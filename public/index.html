@@ -117,6 +117,25 @@
     </div>
   </div>
 
+  <div class="card section" id="chatCard">
+    <h2><span class="live-dot"></span>Live Chat <span class="plain">— the party's right here</span></h2>
+    <div class="chat-list" id="chatList">
+      <p class="empty-note chat-empty" id="chatEmpty">No chatter yet — say hi and get the party going. 🎉</p>
+    </div>
+    <div class="chat-shouts" id="chatShouts">
+      <button type="button" class="chat-shout" data-shout="🎉">🎉 Cheer</button>
+      <button type="button" class="chat-shout" data-shout="😲">😲 Wow</button>
+      <button type="button" class="chat-shout" data-shout="😂">😂 LOL</button>
+      <button type="button" class="chat-shout" data-shout="🔥">🔥 Hot</button>
+      <button type="button" class="chat-shout" data-shout="🍀">🍀 Lucky</button>
+    </div>
+    <form class="chat-form" id="chatForm">
+      <input id="chatInput" type="text" maxlength="200" autocomplete="off" placeholder="Say something fun…">
+      <button class="btn" type="submit" id="chatSendBtn">Send</button>
+    </form>
+    <div class="form-msg" id="chatMsg"></div>
+  </div>
+
   <div class="grid section">
     <div class="card">
       <h2>Leaderboard <span class="plain">— all time</span></h2>
