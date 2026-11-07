@@ -52,6 +52,18 @@
 // capped at 200 chars, one per player every 3 seconds, history pruned to
 // the latest 100. Text is HTML-escaped on the way out. The Wheel posts a
 // spin announcement in chat when each round closes.
+// Env normalization — MUST run before any require that reads env vars
+// (especially ./square) and before any payments logic. On Railway the
+// Square access token variable was created as "SQUARE-ACCESSTOKEN"
+// (hyphen after SQUARE, no underscore in ACCESS_TOKEN). Renaming it in
+// Railway's UI would expose the secret in plain text, so instead the
+// game accepts the token under either name: copy the hyphenated value
+// into the canonical name in memory at startup. The correctly-named
+// SQUARE_ACCESS_TOKEN always takes precedence when both are set.
+if (!process.env.SQUARE_ACCESS_TOKEN && process.env['SQUARE-ACCESSTOKEN']) {
+  process.env.SQUARE_ACCESS_TOKEN = process.env['SQUARE-ACCESSTOKEN'];
+}
+
 const express = require('express');
 const path = require('path');
 const fs = require('fs');
