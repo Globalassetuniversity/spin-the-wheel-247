@@ -74,8 +74,8 @@ function stopGame(g) {
   try {
     const page = await (await fetch(base + '/')).text();
     check('page serves the demo spin button', page.includes('id="demoSpinBtn"') && page.includes('Spin it now'));
-    check('page explains the button is just for fun', page.includes("doesn't change the round") && page.includes('top of every hour'));
-    check('page still says the real wheel spins on the hour', page.includes('The wheel spins itself at the top of every hour'));
+    check('page explains the button is just for fun', page.includes("doesn't change the round") && page.includes('every 5 minutes'));
+    check('page still says the real wheel spins on the hour', page.includes('The wheel spins itself every 5 minutes'));
     const s = await (await fetch(base + '/api/state')).json();
     stateBefore = s;
     check('state snapshot taken', !!s && !!s.round && typeof s.round.id === 'number', `round=${s && s.round && s.round.id}`);
