@@ -26,7 +26,10 @@
 //   the domain verification file served at
 //   /.well-known/apple-developer-merchantid-domain-association (see the
 //   route below). Where Apple Pay is unavailable the button stays
-//   hidden and the card form works as before.
+//   hidden and the card form works as before. A Google Pay button
+//   shows alongside it on Chrome, Firefox, Safari and Edge where
+//   Google Pay is available — same charge path, and it needs no domain
+//   file or registration.
 // - A charge is only CONFIRMED (credits issued) when Square reports the
 //   payment COMPLETED for the exact expected amount in USD. The amount is
 //   always derived server-side from the kind ('single' = $5, 'bundle' =

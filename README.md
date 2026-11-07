@@ -47,14 +47,17 @@ page says so plainly while it is off.
 3. The old payment-link redirect flow (`?paid=single|bundle` + claim) is
    retired — embedded checkout is the only payment path.
 
-### Apple Pay (built, needs one Square step to go live)
+### Apple Pay & Google Pay (built; Apple Pay needs one Square step to go live)
 
 On an iPhone or Mac in Safari, an **Apple Pay button** appears above the
 card form in the checkout panel — the player pays with Face ID / Touch ID
 and the token goes through the exact same server charge path as a card
-token (same $5 / $100 amounts, same verification, same credits). On any
-other browser or device the button stays hidden and the card form works
-as before. Two pieces make it work:
+token (same $5 / $100 amounts, same verification, same credits). On
+Chrome, Firefox, Safari or Edge, a **Google Pay button** appears in the
+same spot and works the same way — no domain file and no registration
+needed for Google Pay. On any other browser or device the wallet buttons
+stay hidden and the card form works as before. Two pieces make Apple Pay
+work:
 
 - **Domain verification file** — already in the repo at
   `public/.well-known/apple-developer-merchantid-domain-association`
@@ -67,7 +70,7 @@ as before. Two pieces make it work:
   Console, open the app, switch to **Production**, choose **Apple Pay**
   in the left pane, and **Add Domain** for
   `spin-the-wheel-247-production.up.railway.app`. Apple Pay stays hidden
-  until that is done; card payments are unaffected.
+  until that is done; Google Pay and card payments are unaffected.
 
 ### Switching payments on — Will's steps
 

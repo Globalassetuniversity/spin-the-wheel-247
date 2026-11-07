@@ -173,7 +173,7 @@
     } else {
       banner.style.display = 'none';
       buyBox.style.display = '';
-      $('buyNote').textContent = 'Pay with Apple Pay or your card right here — no leaving the game. Secure checkout by Square.';
+      $('buyNote').textContent = 'Pay with Apple Pay, Google Pay, or your card right here — no leaving the game. Secure checkout by Square.';
     }
 
     // Credits
@@ -290,15 +290,17 @@
   }
 
   // ---- embedded checkout (Square Web Payments SDK) -------------------
-  // The card form lives on this page, and on Apple devices an Apple Pay
-  // button appears above it. Square tokenizes the card / Apple Pay
-  // payment in the browser and hands us a one-time source ID — the card
-  // number never touches this site. The server charges it and only then
-  // adds plays. Apple Pay only renders on Safari on an Apple device with
-  // Apple Pay set up; everywhere else the button stays hidden and the
-  // card form works exactly as before.
+  // The card form lives on this page, and where they are available an
+  // Apple Pay button (Safari on an Apple device) and a Google Pay button
+  // (Chrome, Firefox, Safari, Edge) appear above it. Square tokenizes
+  // the card / wallet payment in the browser and hands us a one-time
+  // source ID — the card number never touches this site. The server
+  // charges it and only then adds plays. A wallet button only renders
+  // where that wallet is supported and set up; everywhere else it stays
+  // hidden and the card form works exactly as before.
   var squareCard = null;
   var squareApplePay = null;
+  var squareGooglePay = null;
   var squarePayments = null;
   var squareLoading = null;
   var selectedKind = 'single';
@@ -349,6 +351,15 @@
     });
   }
 
+  // The "or pay by card" divider only shows when at least one wallet
+  // button is visible. Called after each wallet init settles (success
+  // or failure) and when the checkout panel opens.
+  function updateWalletDivider() {
+    var show = $('apple-pay-wrap').style.display !== 'none' ||
+      $('google-pay-wrap').style.display !== 'none';
+    $('wallet-divider').style.display = show ? '' : 'none';
+  }
+
   // Apple Pay needs a payment request up front (country, currency, and
   // the exact amount for this purchase), so it is (re)built every time
   // the checkout panel opens for a kind. Any failure — not Safari, no
@@ -372,18 +383,64 @@
       return payments.applePay(paymentRequest).then(function (applePay) {
         squareApplePay = applePay;
         wrap.style.display = '';
+        updateWalletDivider();
         return applePay;
       });
     }).catch(function () {
       wrap.style.display = 'none';
       squareApplePay = null;
+      updateWalletDivider();
       return null;
     });
   }
 
-  // Send a tokenized payment (card nonce or Apple Pay token — the server
-  // charges both the same way) to /api/payments/charge. Only a confirmed
-  // Square payment adds plays; anything else leaves credits untouched.
+  // Google Pay works the same way as Apple Pay — same payment request
+  // shape, same token-to-charge path — but needs no domain file and no
+  // domain registration. It shows on Chrome, Firefox, Safari and Edge
+  // where Google Pay is available. Unlike Apple Pay, the button is
+  // rendered by the SDK into #google-pay-button (attach), so the
+  // container is cleared before each rebuild to avoid stacking two
+  // buttons when the kind changes.
+  function initGooglePay(kind) {
+    var wrap = $('google-pay-wrap');
+    wrap.style.display = 'none';
+    squareGooglePay = null;
+    return getSquarePayments().then(function (payments) {
+      if (!payments) return null;
+      var isBundle = kind === 'bundle';
+      var paymentRequest = payments.paymentRequest({
+        countryCode: 'US',
+        currencyCode: 'USD',
+        total: {
+          amount: isBundle ? '100.00' : '5.00',
+          label: isBundle ? 'Spin the Wheel 24/7 — 22 plays' : 'Spin the Wheel 24/7 — 1 play',
+        },
+      });
+      return payments.googlePay(paymentRequest).then(function (googlePay) {
+        $('google-pay-button').innerHTML = '';
+        return googlePay.attach('#google-pay-button', {
+          buttonColor: 'black',
+          buttonType: 'plain',
+          buttonSizeMode: 'fill',
+        }).then(function () {
+          squareGooglePay = googlePay;
+          wrap.style.display = '';
+          updateWalletDivider();
+          return googlePay;
+        });
+      });
+    }).catch(function () {
+      wrap.style.display = 'none';
+      squareGooglePay = null;
+      updateWalletDivider();
+      return null;
+    });
+  }
+
+  // Send a tokenized payment (card nonce, Apple Pay token or Google Pay
+  // token — the server charges all three the same way) to
+  // /api/payments/charge. Only a confirmed Square payment adds plays;
+  // anything else leaves credits untouched.
   function submitCharge(sourceId, name) {
     var msg = $('payMsg');
     var btn = $('payBtn');
@@ -439,8 +496,10 @@
       }
       $('payBtn').disabled = false;
     });
-    // Apple Pay appears only where it is supported; failure is silent.
+    // Wallet buttons appear only where they are supported; failure is silent.
     initApplePay(kind);
+    initGooglePay(kind);
+    updateWalletDivider();
   }
 
   $('buySingleBtn').addEventListener('click', function () { showCheckout('single'); });
@@ -505,6 +564,41 @@
         var first = (result.errors && result.errors[0]) || {};
         msg.classList.add('err');
         msg.textContent = first.message || 'Apple Pay could not complete — try the card form below.';
+        return;
+      }
+      submitCharge(result.token, name);
+    }).catch(function () {
+      msg.classList.add('err');
+      msg.textContent = 'Could not reach the game — check your connection and try again.';
+    });
+  });
+
+  // The Google Pay button is rendered by the SDK into #google-pay-button;
+  // clicks on it bubble up to this listener on the container.
+  $('google-pay-button').addEventListener('click', function (event) {
+    event.preventDefault();
+    var msg = $('payMsg');
+    msg.className = 'form-msg';
+    msg.textContent = '';
+    var name = $('nameInput').value.trim();
+    if (!name) {
+      msg.classList.add('err');
+      msg.textContent = 'Enter your name below first, so the plays go to the right player.';
+      return;
+    }
+    if (!squareGooglePay) {
+      msg.classList.add('err');
+      msg.textContent = 'Google Pay is not available right now — use the card form below.';
+      return;
+    }
+    msg.textContent = 'Waiting for Google Pay…';
+    // tokenize() is called immediately in the click handler — no awaits
+    // or API calls before it.
+    squareGooglePay.tokenize().then(function (result) {
+      if (result.status !== 'OK') {
+        var first = (result.errors && result.errors[0]) || {};
+        msg.classList.add('err');
+        msg.textContent = first.message || 'Google Pay could not complete — try the card form below.';
         return;
       }
       submitCharge(result.token, name);

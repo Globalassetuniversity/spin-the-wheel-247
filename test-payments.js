@@ -8,6 +8,8 @@
 //   Apple Pay: domain verification file serves 200 (live + free preview);
 //     an Apple Pay token charges through the same /api/payments/charge
 //     path as a card token and credits the same plays
+//   Google Pay: a Google Pay token charges through the same path too
+//     (no domain file or registration needed for Google Pay)
 //   free-preview mode (no Square env): page loads, guesses free, charge 400s
 //   /api/square-config never leaks the access token
 // Usage: node test-payments.js   (exit 0 = all pass)
@@ -69,6 +71,8 @@ function startMockSquare() {
       // An Apple Pay token is just another one-time source ID to Square:
       // same charge path, same verification, same credits as a card token.
       if (src === 'tok_applepay_500') return send(200, pay('pay_apple500', 'COMPLETED', 500));
+      // Same for Google Pay: another one-time source ID, same charge path.
+      if (src === 'tok_googlepay_500') return send(200, pay('pay_google500', 'COMPLETED', 500));
       if (src === 'tok_declined') return send(402, { errors: [{ code: 'CARD_DECLINED', detail: 'Card declined.' }] });
       if (src === 'tok_wrong_amount') return send(200, pay('pay_wrong', 'COMPLETED', 9999));
       if (src === 'tok_pending') return send(200, pay('pay_pending', 'APPROVED', 500));
@@ -247,6 +251,15 @@ async function main() {
     r.status === 200 && r.body.ok === true && r.body.status === 'confirmed'
     && r.body.paidCredits === 1 && r.body.bonusCredits === 0, JSON.stringify(r.body));
 
+  // Google Pay: same story — one-time source ID, same charge path,
+  // same credits (fresh player E).
+  const tokenE = 'test-player-e-0005';
+  await api(P2, 'POST', '/api/player', { playerToken: tokenE, name: 'Erin' });
+  r = await api(P2, 'POST', '/api/payments/charge', { playerToken: tokenE, name: 'Erin', kind: 'single', sourceId: 'tok_googlepay_500' });
+  check('Google Pay token charges + credits 1 paid play (same charge path)',
+    r.status === 200 && r.body.ok === true && r.body.status === 'confirmed'
+    && r.body.paidCredits === 1 && r.body.bonusCredits === 0, JSON.stringify(r.body));
+
   // Paid guess: A spends a bonus credit first (free play), counts as bonus
   r = await api(P2, 'POST', '/api/guess', { playerToken: tokenA, name: 'Alice', guess: 42 });
   check('paid-mode guess succeeds', r.status === 200 && r.body.ok === true && r.body.guess === 42, JSON.stringify(r.body));
@@ -272,15 +285,16 @@ async function main() {
     JSON.stringify(r.body));
   const home = await page(P3, '/');
   check('game page loads (200)', home.status === 200);
-  check('page has embedded checkout UI incl. Apple Pay button, no claim UI',
+  check('page has embedded checkout UI incl. wallet buttons, no claim UI',
     home.text.includes('checkoutBox') && home.text.includes('card-container')
-    && home.text.includes('apple-pay-button')
+    && home.text.includes('apple-pay-button') && home.text.includes('google-pay-button')
     && !home.text.includes('claimBox') && !home.text.includes('/api/payments/claim'),
     'page still references the old claim flow');
   const appJs = await page(P3, '/app.js');
-  check('app.js posts to /api/payments/charge, not /claim, and wires Apple Pay',
+  check('app.js posts to /api/payments/charge, not /claim, and wires Apple Pay + Google Pay',
     appJs.text.includes('/api/payments/charge') && !appJs.text.includes('/api/payments/claim')
-    && appJs.text.includes('applePay') && appJs.text.includes('apple-pay-button'));
+    && appJs.text.includes('applePay') && appJs.text.includes('apple-pay-button')
+    && appJs.text.includes('googlePay') && appJs.text.includes('google-pay-button'));
   const admin = await page(P3, '/admin');
   check('admin page loads (200)', admin.status === 200);
   // The domain file is public and static: it serves in free-preview mode

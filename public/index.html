@@ -79,15 +79,18 @@
         <div id="buyBox">
           <button class="btn buy-btn" id="buySingleBtn" type="button">Buy 1 play — $5</button>
           <button class="btn buy-btn bundle" id="buyBundleBtn" type="button">$100 = 22 plays (2 FREE)</button>
-          <p class="buy-note" id="buyNote">Pay with Apple Pay or your card right here — no leaving the game. Secure checkout by Square.</p>
+          <p class="buy-note" id="buyNote">Pay with Apple Pay, Google Pay, or your card right here — no leaving the game. Secure checkout by Square.</p>
         </div>
         <div id="checkoutBox" class="checkout-box" style="display:none">
           <h3 id="checkoutTitle">Pay $5 — 1 play</h3>
           <p class="muted">Charged securely by Square. You stay right here — no redirect, no new tab.</p>
           <div id="apple-pay-wrap" style="display:none">
             <button id="apple-pay-button" type="button" aria-label="Pay with Apple Pay"></button>
-            <p class="or-divider">or pay by card</p>
           </div>
+          <div id="google-pay-wrap" style="display:none">
+            <div id="google-pay-button"></div>
+          </div>
+          <p class="or-divider" id="wallet-divider" style="display:none">or pay by card</p>
           <div id="card-container"></div>
           <div class="row" style="margin-top:12px">
             <button class="btn" id="payBtn" type="button" disabled>Pay $5.00</button>
@@ -145,7 +148,7 @@
   <div class="card section">
     <h2>How to Play</h2>
     <div class="steps">
-      <div class="step"><div class="n">1</div><p><b>Buy plays — $5 each</b>, or the $100 bundle for 22 plays. Pay with Apple Pay or your card right here on the page — no leaving the game. Your credits stay on your account across rounds.</p></div>
+      <div class="step"><div class="n">1</div><p><b>Buy plays — $5 each</b>, or the $100 bundle for 22 plays. Pay with Apple Pay, Google Pay, or your card right here on the page — no leaving the game. Your credits stay on your account across rounds.</p></div>
       <div class="step"><div class="n">2</div><p><b>Pick a number 0–100</b> for this round. Use more than one play if you want — just pick different numbers.</p></div>
       <div class="step"><div class="n">3</div><p><b>The wheel spins itself</b> at the top of the hour. Closest guess wins 70% of the pot; hit it exact and take the jackpot too.</p></div>
     </div>

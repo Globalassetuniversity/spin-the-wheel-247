@@ -247,6 +247,10 @@ tr.me td { color: var(--amber); }
   text-transform: uppercase; letter-spacing: .18em;
 }
 /* Square's card iframe inherits the page font sizing via its own styles. */
+/* Google Pay button (Web Payments SDK renders it into #google-pay-button).
+   Same show/hide rule as Apple Pay: only where Google Pay is available. */
+#google-pay-wrap { margin-bottom: 10px; }
+#google-pay-button { min-height: 40px; }
 .tag-paid, .tag-free {
   font-family: 'Orbitron', sans-serif; font-size: 10px; padding: 2px 6px; border-radius: 999px; font-weight: 800;
 }
