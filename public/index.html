@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Spin the Wheel 24/7 — Guess 0–100, Win the Jackpot</title>
-<meta name="description" content="A self-running number game. $5 a play — pick a number from 0 to 100, the wheel spins every hour on its own. Closest guess wins 70% of the pot — hit the exact number and take the jackpot.">
+<meta name="description" content="A self-running number game. $5 a play — pick a number from 0 to 100, the wheel spins every 5 minutes on its own. Closest guess wins 70% of the pot — hit the exact number and take the jackpot.">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@600;800;900&family=Rajdhani:wght@500;600;700&display=swap" rel="stylesheet">
@@ -14,7 +14,7 @@
 <div class="wrap">
   <div class="kicker"><span class="live-dot"></span>On-chain energy &bull; Live 24/7</div>
   <h1 class="title">SPIN THE WHEEL</h1>
-  <p class="subtitle">Guess a number from 0 to 100. The wheel spins every hour, all by itself.<br>
+  <p class="subtitle">Guess a number from 0 to 100. The wheel spins every 5 minutes, all by itself.<br>
   Closest guess wins 70% of the pot. Hit the exact number and take the jackpot.</p>
 
   <div id="payBanner" class="pay-banner" style="display:none"></div>
@@ -65,9 +65,9 @@
         <canvas id="wheel" width="1200" height="1200"></canvas>
       </div>
       <button class="btn demo-spin-btn" id="demoSpinBtn" type="button">🎡 Spin it now</button>
-      <p class="demo-note">Just for fun — this spin is only a preview. It doesn't change the round, your guesses, or the pot. The real wheel spins at the top of every hour.</p>
+      <p class="demo-note">Just for fun — this spin is only a preview. It doesn't change the round, your guesses, or the pot. The real wheel spins every 5 minutes.</p>
       <div id="resultBanner" class="result-banner" style="display:none"></div>
-      <p class="spin-note" id="spinNote">The wheel spins itself at the top of every hour (Eastern). No host needed.</p>
+      <p class="spin-note" id="spinNote">The wheel spins itself every 5 minutes (Eastern). No host needed.</p>
     </div>
 
     <div>
@@ -171,11 +171,11 @@
     <div class="steps">
       <div class="step"><div class="n">1</div><p><b>Buy plays — $5 each</b>, or the $100 bundle for 22 plays. Pay with Apple Pay, Google Pay, or your card right here on the page — no leaving the game. Your credits stay on your account across rounds.</p></div>
       <div class="step"><div class="n">2</div><p><b>Pick a number 0–100</b> for this round. Use more than one play if you want — just pick different numbers.</p></div>
-      <div class="step"><div class="n">3</div><p><b>The wheel spins itself</b> at the top of the hour. Closest guess wins 70% of the pot; hit it exact and take the jackpot too.</p></div>
+      <div class="step"><div class="n">3</div><p><b>The wheel spins itself</b> every 5 minutes. Closest guess wins 70% of the pot; hit it exact and take the jackpot too.</p></div>
     </div>
   </div>
 
-  <p class="footer">No login &bull; One guess per number, per player, per round &bull; New round every hour, on the hour (Eastern Time) &bull; Free plays can win but add $0 to the pot</p>
+  <p class="footer">No login &bull; One guess per number, per player, per round &bull; New round every 5 minutes (Eastern Time) &bull; Free plays can win but add $0 to the pot</p>
 </div>
 <script src="app.js"></script>
 </body>
