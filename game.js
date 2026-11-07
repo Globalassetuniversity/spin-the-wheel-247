@@ -135,6 +135,20 @@ function newReferralCode() {
   return code;
 }
 
+// ---- jackpot bonus spin ---------------------------------------------------
+// An exact hit earns the winner ONE bonus spin (locked in Nov 7, 2026):
+// the server draws a fresh number when the winner takes it, and if the
+// result lands within JACKPOT_SPIN_WINDOW of the number that won the
+// jackpot, the winner gets JACKPOT_SPIN_BONUS_PLAYS extra bonus (free)
+// plays. The jackpot payout itself never changes. Plain linear
+// distance — the same measure computeWinners uses for closest guesses.
+const JACKPOT_SPIN_WINDOW = 5;
+const JACKPOT_SPIN_BONUS_PLAYS = 10;
+
+function jackpotSpinBonusAwarded(resultNumber, winningNumber) {
+  return Math.abs(resultNumber - winningNumber) <= JACKPOT_SPIN_WINDOW;
+}
+
 // Which credit gets spent: bonus credits first (free plays are the perk —
 // spend them before paid credits). Returns { useBonus, usePaid } counts.
 function consumeCredits(paid, bonus, needed = 1) {
@@ -165,6 +179,9 @@ module.exports = {
   computeRoundEnd,
   drawWinningNumber,
   computeWinners,
+  JACKPOT_SPIN_WINDOW,
+  JACKPOT_SPIN_BONUS_PLAYS,
+  jackpotSpinBonusAwarded,
   normalizeName,
   normalizeToken,
   newPlayerToken,
