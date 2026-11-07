@@ -11,6 +11,11 @@
 // - Closest guess wins the round (70% of the round's paid pot). Hit the
 //   exact number and you ALSO take the whole jackpot (rollover + this
 //   round's 10%); the jackpot then resets to $0.
+// - Jackpot bonus spin (Nov 7, 2026): an exact hit also earns the winner
+//   ONE bonus spin, which waits for them (no expiry). When they take it,
+//   the server draws a fresh number; landing within 5 of the number that
+//   won the jackpot pays +10 bonus (free) plays. The jackpot payout
+//   itself is fixed at round close and never changes.
 // - Referrals: a friend who pays for at least one game earns the referrer
 //   1 free play, once per friend. Joining free earns nothing.
 //
@@ -80,6 +85,8 @@ const {
   computeRoundEnd,
   drawWinningNumber,
   computeWinners,
+  JACKPOT_SPIN_BONUS_PLAYS,
+  jackpotSpinBonusAwarded,
   normalizeName,
   normalizeToken,
   newPlayerToken,
@@ -169,6 +176,18 @@ CREATE TABLE IF NOT EXISTS chat_reactions (
   emoji TEXT NOT NULL,
   created_at INTEGER NOT NULL,
   UNIQUE(message_id, player_token, emoji)
+);
+CREATE TABLE IF NOT EXISTS jackpot_spins (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  round_id INTEGER NOT NULL,
+  player_token TEXT NOT NULL,
+  winning_number INTEGER NOT NULL,
+  jackpot_cents INTEGER NOT NULL DEFAULT 0,
+  status TEXT NOT NULL DEFAULT 'pending',
+  result_number INTEGER,
+  bonus_awarded INTEGER NOT NULL DEFAULT 0,
+  created_at INTEGER NOT NULL,
+  spun_at INTEGER
 );
 `);
 
@@ -422,6 +441,15 @@ function closeRound(round, now) {
     winnerPayout = eachWinnerShare + eachJackpotShare;
     jackpotPaid = eachJackpotShare * result.winners.length;
     for (const w of result.winners) payPlayer(w.player_token, w.name, winnerPayout, 1, 1);
+    // Each exact winner also earns ONE jackpot bonus spin. The row waits
+    // for them (status 'pending', no expiry) until they take it via
+    // POST /api/jackpot-spin; the payout above never depends on it.
+    for (const w of result.winners) {
+      db.prepare(
+        `INSERT INTO jackpot_spins (round_id, player_token, winning_number, jackpot_cents, status, created_at)
+         VALUES (?, ?, ?, ?, 'pending', ?)`
+      ).run(round.id, w.player_token, winningNumber, eachJackpotShare, now);
+    }
     setJackpotCents(jackpotBefore - jackpotPaid); // remainder (rounding dust) stays
   } else if (result.type === 'closest') {
     const w = result.winners[0];
@@ -536,6 +564,14 @@ function publicState(playerToken) {
   if (playerToken) {
     const p = getPlayer(playerToken);
     if (p) {
+      // The oldest pending jackpot bonus spin, if any — the page offers
+      // it by the wheel whenever the winner comes back. Spins never
+      // expire; if a player somehow has several, they surface one at a
+      // time, oldest first.
+      const js = db.prepare(
+        `SELECT id, round_id, winning_number, jackpot_cents FROM jackpot_spins
+         WHERE player_token = ? AND status = 'pending' ORDER BY id ASC LIMIT 1`
+      ).get(p.player_token);
       me = {
         playerToken: p.player_token,
         name: p.display_name,
@@ -547,6 +583,12 @@ function publicState(playerToken) {
         totalWonCents: p.total_won_cents,
         roundsWon: p.rounds_won,
         jackpotsWon: p.jackpots_won,
+        jackpotSpin: js ? {
+          id: js.id,
+          roundId: js.round_id,
+          winningNumber: js.winning_number,
+          jackpotCents: js.jackpot_cents,
+        } : null,
       };
     }
   }
@@ -795,6 +837,84 @@ app.post('/api/guess', throttle(10), (req, res) => {
     ok: true, roundId: round.id, name, guess, creditType,
     paidCredits: fresh.paid_credits, bonusCredits: fresh.bonus_credits,
     jackpotCents: displayJackpotCents(round), endsAt: round.ends_at,
+  });
+});
+
+// ---- jackpot bonus spin ---------------------------------------------------
+// An exact hit earns the winner one bonus spin (row created in
+// closeRound). Taking it is a free, one-time action: the SERVER draws
+// the result here — a client-supplied number is never trusted. Landing
+// within 5 of the winning number credits +10 bonus plays (the same free
+// plays as bundle/referral bonuses: they can win, add $0 to the pot).
+// The jackpot payout was fixed at round close and is never touched here.
+function postWheelChat(text, at) {
+  db.prepare(
+    'INSERT INTO chat_messages (player_token, name, text, created_at) VALUES (?, ?, ?, ?)'
+  ).run('system', '🎡 Wheel', text, at);
+  pruneChat();
+}
+
+app.post('/api/jackpot-spin', throttle(10), (req, res) => {
+  const token = normalizeToken(req.body && req.body.playerToken);
+  if (!token) return res.status(400).json({ ok: false, error: 'Reload the page and try again.' });
+  const spinId = parseInt(req.body && req.body.spinId, 10);
+  if (!Number.isInteger(spinId) || spinId <= 0) {
+    return res.status(400).json({ ok: false, error: 'That bonus spin is not valid.' });
+  }
+  const spin = db.prepare('SELECT * FROM jackpot_spins WHERE id = ?').get(spinId);
+  if (!spin) return res.status(404).json({ ok: false, error: 'That bonus spin is gone.' });
+  if (spin.player_token !== token) {
+    return res.status(403).json({ ok: false, error: 'That bonus spin belongs to another player.' });
+  }
+  if (spin.status !== 'pending') {
+    return res.status(409).json({ ok: false, error: 'That bonus spin was already taken.' });
+  }
+  const player = getPlayer(token);
+  const name = player ? player.display_name : 'Player';
+  const now = Date.now();
+  const resultNumber = drawWinningNumber();
+  const withinWindow = jackpotSpinBonusAwarded(resultNumber, spin.winning_number);
+  const bonusAwarded = withinWindow ? JACKPOT_SPIN_BONUS_PLAYS : 0;
+
+  // Claim it atomically: the guarded UPDATE only lands while the spin is
+  // still pending, so a double-tap can never draw (or pay) twice.
+  const claimed = db.prepare(
+    `UPDATE jackpot_spins SET status = 'spun', result_number = ?, bonus_awarded = ?, spun_at = ?
+     WHERE id = ? AND status = 'pending'`
+  ).run(resultNumber, bonusAwarded, now, spinId);
+  if (!claimed.changes) {
+    return res.status(409).json({ ok: false, error: 'That bonus spin was already taken.' });
+  }
+  if (bonusAwarded > 0) {
+    db.prepare(
+      'UPDATE players SET bonus_credits = bonus_credits + ?, updated_at = ? WHERE player_token = ?'
+    ).run(bonusAwarded, now, token);
+  }
+
+  // The party hears about it — same Wheel system messages a round close
+  // posts. Guarded: chat must never break the spin.
+  try {
+    postWheelChat(`🎰 ${name} is taking their JACKPOT BONUS SPIN…`, now);
+    if (withinWindow) {
+      postWheelChat(
+        `🎉 ${name} landed ${resultNumber} — within 5 of ${spin.winning_number}! +${JACKPOT_SPIN_BONUS_PLAYS} FREE plays!`,
+        now
+      );
+    }
+  } catch (e) { /* chat is decoration */ }
+
+  const fresh = getPlayer(token);
+  res.json({
+    ok: true,
+    spinId,
+    roundId: spin.round_id,
+    winningNumber: spin.winning_number,
+    jackpotCents: spin.jackpot_cents,
+    resultNumber,
+    withinWindow,
+    bonusAwarded,
+    paidCredits: fresh ? fresh.paid_credits : 0,
+    bonusCredits: fresh ? fresh.bonus_credits : 0,
   });
 });
 
