@@ -1,0 +1,155 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Spin the Wheel 24/7 — Guess 0–100, Win the Jackpot</title>
+<meta name="description" content="A self-running number game. $5 a play — pick a number from 0 to 100, the wheel spins every hour on its own. Closest guess wins 70% of the pot — hit the exact number and take the jackpot.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@600;800;900&family=Rajdhani:wght@500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="wrap">
+  <div class="kicker"><span class="live-dot"></span>On-chain energy &bull; Live 24/7</div>
+  <h1 class="title">SPIN THE WHEEL</h1>
+  <p class="subtitle">Guess a number from 0 to 100. The wheel spins every hour, all by itself.<br>
+  Closest guess wins 70% of the pot. Hit the exact number and take the jackpot.</p>
+
+  <div id="payBanner" class="pay-banner" style="display:none"></div>
+
+  <div class="status-bar">
+    <div class="stat jackpot">
+      <div class="label">Jackpot</div>
+      <div class="value" id="jackpot">—</div>
+      <div class="sub">rolls over until someone hits the exact number</div>
+    </div>
+    <div class="stat countdown">
+      <div class="label">Next spin in</div>
+      <div class="value" id="countdown">—</div>
+      <div class="sub" id="roundLabel">Round —</div>
+    </div>
+    <div class="stat">
+      <div class="label">This round's pot</div>
+      <div class="value" id="pot">—</div>
+      <div class="sub" id="potSub">—</div>
+    </div>
+  </div>
+
+  <div class="split-bar card">
+    <h2>Where the money goes</h2>
+    <div class="split-row">
+      <div class="split-cell"><span class="split-pct">70%</span><span class="split-what">Round winner</span></div>
+      <div class="split-cell"><span class="split-pct">10%</span><span class="split-what">Jackpot rollover</span></div>
+      <div class="split-cell"><span class="split-pct">20%</span><span class="split-what">House</span></div>
+    </div>
+    <p class="split-example">Example: 20 players &times; $5 = <b>$100 pot</b> &rarr; winner <b>$70</b>, jackpot <b>+$10</b>, house <b>$20</b>. Bonus and referral plays can win, but add $0 to the pot.</p>
+  </div>
+
+  <div class="grid section">
+    <div class="card">
+      <h2>The Wheel</h2>
+      <div class="readout">
+        <div>
+          <div class="lbl">Under the pointer</div>
+          <div style="display:flex;align-items:center;justify-content:center;gap:10px">
+            <span class="side" id="prevNum">—</span>
+            <span class="current" id="currentNum">—</span>
+            <span class="side" id="nextNum">—</span>
+          </div>
+        </div>
+      </div>
+      <div class="wheel-wrap">
+        <div class="wheel-halo"></div>
+        <canvas id="wheel" width="1200" height="1200"></canvas>
+      </div>
+      <div id="resultBanner" class="result-banner" style="display:none"></div>
+      <p class="spin-note" id="spinNote">The wheel spins itself at the top of every hour (Eastern). No host needed.</p>
+    </div>
+
+    <div>
+      <div class="card">
+        <h2>Your Plays</h2>
+        <div class="credits">
+          <div class="credit-box"><span class="credit-num" id="paidCredits">0</span><span class="credit-lbl">paid plays</span></div>
+          <div class="credit-box"><span class="credit-num" id="bonusCredits">0</span><span class="credit-lbl">free plays</span></div>
+        </div>
+        <p class="credit-note" id="creditNote">1 credit = 1 guess. Free plays are spent first.</p>
+        <div id="buyBox">
+          <a class="btn buy-btn" id="buySingleBtn" href="#" target="_blank" rel="noopener">Buy 1 play — $5</a>
+          <a class="btn buy-btn bundle" id="buyBundleBtn" href="#" target="_blank" rel="noopener">$100 = 22 plays (2 FREE)</a>
+          <p class="buy-note" id="buyNote">Pay securely with Square — you'll come right back here to claim your plays.</p>
+        </div>
+        <div id="claimBox" class="claim-box" style="display:none">
+          <h3>Claim your plays</h3>
+          <p class="muted" id="claimText">Paid on Square? Paste your order ID and claim your plays.</p>
+          <input id="claimOrderId" type="text" placeholder="Square order ID (from your receipt)" autocomplete="off">
+          <input id="claimReceipt" type="text" placeholder="Receipt number (optional)" autocomplete="off" style="margin-top:8px">
+          <div class="row" style="margin-top:10px">
+            <button class="btn" id="claimSingleBtn" type="button">Claim 1 play ($5)</button>
+            <button class="btn" id="claimBundleBtn" type="button">Claim bundle ($100)</button>
+          </div>
+          <div class="form-msg" id="claimMsg"></div>
+        </div>
+      </div>
+
+      <div class="card section">
+        <h2>Your Guess <span class="plain">— this round</span></h2>
+        <div id="youIn" class="you-in" style="display:none"></div>
+        <form class="guess-form" id="guessForm">
+          <label for="nameInput">Your name</label>
+          <input id="nameInput" type="text" maxlength="24" autocomplete="off" placeholder="e.g. Will">
+          <label for="guessInput">Your number (0–100)</label>
+          <input id="guessInput" type="number" min="0" max="100" step="1" inputmode="numeric" placeholder="e.g. 47">
+          <button class="btn" type="submit" id="guessBtn">Lock in my guess — 1 credit</button>
+          <div class="form-msg" id="formMsg"></div>
+        </form>
+        <div class="guess-chips" id="guessChips"></div>
+        <p class="empty-note" id="noGuesses" style="display:none">No guesses yet this round — be the first in.</p>
+      </div>
+    </div>
+  </div>
+
+  <div class="grid section">
+    <div class="card">
+      <h2>Leaderboard <span class="plain">— all time</span></h2>
+      <div id="leaderboard"></div>
+    </div>
+    <div class="card">
+      <h2>Invite Friends, Earn Free Plays</h2>
+      <p class="muted" style="margin-top:0">Share your link. When a friend <b>pays</b> for at least one game — a $5 play or the $100 bundle — you earn <b>1 free play</b>. Joining free earns nothing. One free play per friend who pays.</p>
+      <div class="ref-row">
+        <input id="refLink" type="text" readonly onclick="this.select()">
+        <button class="btn" id="copyRefBtn" type="button">Copy link</button>
+      </div>
+      <p class="ref-stats" id="refStats">Free plays earned: 0 &bull; Friends who paid: 0</p>
+    </div>
+  </div>
+
+  <div class="card section">
+    <h2>Recent Rounds</h2>
+    <ul class="history-list" id="history"></ul>
+    <p class="empty-note" id="noHistory" style="display:none">No finished rounds yet — the first spin is coming up.</p>
+  </div>
+
+  <div class="card section">
+    <h2>Intermission Sponsors</h2>
+    <div class="sponsors" id="sponsors"></div>
+    <p class="empty-note" style="margin-top:10px">Sponsor spots are $25–$50 per spot. Your business here, in front of every player, every round.</p>
+  </div>
+
+  <div class="card section">
+    <h2>How to Play</h2>
+    <div class="steps">
+      <div class="step"><div class="n">1</div><p><b>Buy plays — $5 each</b>, or the $100 bundle for 22 plays. Your credits stay on your account across rounds.</p></div>
+      <div class="step"><div class="n">2</div><p><b>Pick a number 0–100</b> for this round. Use more than one play if you want — just pick different numbers.</p></div>
+      <div class="step"><div class="n">3</div><p><b>The wheel spins itself</b> at the top of the hour. Closest guess wins 70% of the pot; hit it exact and take the jackpot too.</p></div>
+    </div>
+  </div>
+
+  <p class="footer">No login &bull; One guess per number, per player, per round &bull; New round every hour, on the hour (Eastern Time) &bull; Free plays can win but add $0 to the pot</p>
+</div>
+<script src="app.js"></script>
+</body>
+</html>
