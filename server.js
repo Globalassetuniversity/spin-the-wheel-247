@@ -47,7 +47,7 @@
 // - The old payment-link redirect flow (?paid=single|bundle + claim) is
 //   retired — there is one payment path now.
 //
-// ROUNDS — 5 minutes, aligned to 5-minute boundaries on the
+// ROUNDS — 1 minute, aligned to minute boundaries on the
 // America/New_York clock. A tick runs every 5 seconds (and on every API
 // call): any round whose end time passed is drawn, winners are paid,
 // and the next round opens. No login.
