@@ -112,6 +112,13 @@ h1.title {
 .result-banner.jackpot-hit .big { color: var(--cyan); text-shadow: 0 0 16px rgba(34, 211, 238, .8); }
 .spin-note { text-align: center; color: var(--muted); font-size: 14px; margin-top: 8px; }
 
+/* Demo spin — tap-to-spin preview. Big neon button under the wheel; the
+   wheel itself is tappable too (cursor shows it). Disabled while any
+   spin is running, via the shared .btn:disabled style. */
+.demo-spin-btn { display: block; width: 100%; margin-top: 14px; font-size: 18px; padding: 15px 18px; }
+.wheel-wrap canvas { cursor: pointer; }
+.demo-note { text-align: center; color: var(--muted); font-size: 14px; margin: 8px 0 0; }
+
 /* guess form */
 .guess-form { display: flex; flex-direction: column; gap: 10px; }
 .guess-form label { font-size: 13px; letter-spacing: .18em; text-transform: uppercase; color: var(--muted); font-weight: 700; }
