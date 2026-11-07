@@ -1,8 +1,8 @@
 # Spin the Wheel 24/7
 
 A self-running public number game. Players open the link any time, enter a
-name and a guess from 0 to 100. The wheel spins by itself at the top of every
-hour (Eastern Time) — nobody has to press anything or be live.
+name and a guess from 0 to 100. The wheel spins by itself every 5 minutes
+(Eastern Time) — nobody has to press anything or be live.
 
 ## Money model (locked in Nov 6, 2026)
 
@@ -128,7 +128,7 @@ all sound functions, ticks during a real spin animation).
 
 ## How it runs itself
 
-Rounds are 60 minutes, aligned to the America/New_York hour. A tick runs
+Rounds are 5 minutes, aligned to 5-minute boundaries on the America/New_York clock. A tick runs
 every 5 seconds (and on every API call): any round whose end time passed is
 drawn with a random winning number, winners are paid, and the next round
 opens. A restart never loses state — rounds, guesses, credits, points, and
@@ -159,7 +159,7 @@ a mock Square server (no real charges).
    `SQUARE_APPLICATION_ID` + `SQUARE_LOCATION_ID` +
    `SQUARE_ACCESS_TOKEN` (Square production credentials, for card payments).
 4. Deploy. Open the Railway-generated URL — the game is live immediately;
-   the first round opens on first boot and spins at the next hour.
+   the first round opens on first boot and spins at the next 5-minute mark.
 5. Railway needs the **Hobby plan ($5/month)** for the volume to persist
    across restarts. Without the volume, rounds/credits/jackpot reset on
    every redeploy.
