@@ -33,7 +33,12 @@ function freePort() {
 function startGame() {
   return new Promise(async (resolve, reject) => {
     const port = await freePort();
-    const env = { ...process.env, PORT: String(port), DB_PATH: DB, ADMIN_CODE: 'testadmin' };
+    // ROUND_MINUTES=60 pins the test server to one long round: Phase 3
+    // compares /api/state before/after, and with production rounds at
+    // 1 minute a real rollover mid-test would change round id/lastResult
+    // on its own and make those checks flaky. Round timing itself is
+    // covered by test-rounds.js.
+    const env = { ...process.env, PORT: String(port), DB_PATH: DB, ADMIN_CODE: 'testadmin', ROUND_MINUTES: '60' };
     const child = spawn('node', ['server.js'], { cwd: DIR, env, stdio: ['ignore', 'pipe', 'pipe'] });
     let out = '';
     child.stdout.on('data', (d) => { out += d; });
@@ -74,8 +79,8 @@ function stopGame(g) {
   try {
     const page = await (await fetch(base + '/')).text();
     check('page serves the demo spin button', page.includes('id="demoSpinBtn"') && page.includes('Spin it now'));
-    check('page explains the button is just for fun', page.includes("doesn't change the round") && page.includes('every 5 minutes'));
-    check('page still says the real wheel spins on the hour', page.includes('The wheel spins itself every 5 minutes'));
+    check('page explains the button is just for fun', page.includes("doesn't change the round") && page.includes('every minute'));
+    check('page still says the real wheel spins every minute', page.includes('The wheel spins itself every minute'));
     const s = await (await fetch(base + '/api/state')).json();
     stateBefore = s;
     check('state snapshot taken', !!s && !!s.round && typeof s.round.id === 'number', `round=${s && s.round && s.round.id}`);
