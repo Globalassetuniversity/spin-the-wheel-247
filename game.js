@@ -46,11 +46,12 @@ function formatCents(cents) {
 }
 
 // ---- round timing -------------------------------------------------------
-// Rounds are 5 minutes, aligned to the America/New_York clock: a round
-// ends at :00, :05, :10, … :55 ET and the next one opens immediately.
+// Rounds are 1 minute, aligned to the America/New_York clock: a round
+// ends at :00 seconds of the next ET minute and the next one opens
+// immediately.
 // ROUND_MINUTES env overrides the length (used for local testing only);
 // with an override, rounds are fixed-length from their start time.
-const ROUND_INTERVAL_MS = 5 * 60 * 1000;
+const ROUND_INTERVAL_MS = 60 * 1000;
 
 function roundLengthMs() {
   const m = parseInt(process.env.ROUND_MINUTES || '', 10);
@@ -72,8 +73,8 @@ function etOffsetMs(date) {
   return asUTC - date.getTime();
 }
 
-// Epoch ms of the next America/New_York 5-minute boundary after nowMs
-// (ET wall-clock minutes :00, :05, :10, … :55, on the minute).
+// Epoch ms of the next America/New_York minute boundary after nowMs
+// (ET wall clock, at :00 seconds of the next minute).
 function nextEtRoundBoundary(nowMs) {
   const off = etOffsetMs(new Date(nowMs));
   const wall = nowMs + off;
