@@ -166,19 +166,6 @@ tr.me td { color: var(--amber); }
 .history-list .wn { font-family: 'Orbitron', sans-serif; color: var(--cyan); font-weight: 800; }
 .history-list .jp { color: var(--amber); font-weight: 800; }
 
-/* sponsors */
-.sponsors { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }
-@media (max-width: 820px) { .sponsors { grid-template-columns: 1fr; } }
-.sponsor {
-  border: 1px solid var(--panel-border); border-radius: 14px; padding: 14px;
-  background: rgba(2, 6, 23, .55); text-align: center;
-}
-.sponsor.filled { border-color: rgba(245, 158, 11, .55); box-shadow: 0 0 18px rgba(245, 158, 11, .18); }
-.sponsor .s-name { font-family: 'Orbitron', sans-serif; font-size: 18px; font-weight: 800; }
-.sponsor .s-msg { color: var(--muted); font-size: 15px; margin-top: 4px; }
-.sponsor .s-price { margin-top: 8px; font-family: 'Orbitron', sans-serif; color: var(--amber); font-size: 14px; }
-.sponsor .s-avail { font-size: 15px; color: var(--muted); font-weight: 700; }
-
 /* how to play */
 .steps { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }
 @media (max-width: 820px) { .steps { grid-template-columns: 1fr; } }
