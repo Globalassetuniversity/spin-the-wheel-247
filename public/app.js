@@ -273,6 +273,7 @@
       .then(function (res) { return res.json(); })
       .then(render)
       .catch(function () { /* keep the last good state on screen */ });
+    fetchChat();
   }
 
   setInterval(function () {
@@ -652,6 +653,140 @@
         formMsg.classList.add('err');
         formMsg.textContent = 'Could not reach the game — check your connection and try again.';
       });
+  });
+
+  // ---- live chat ------------------------------------------------------------
+  // Fun + playful: short messages, emoji reactions on every message, and
+  // one-tap shouts (Cheer, Wow, LOL…). Polls /api/chat every few seconds
+  // alongside the game state. The server HTML-escapes message text, so it
+  // is rendered as-is; names are escaped here like everywhere else.
+  var CHAT_EMOJIS = ['🎉', '🙌', '😲', '😂', '🔥', '👀', '💯', '🍀'];
+  var lastChatId = 0;
+  var chatSeen = {};
+
+  function fmtChatTime(ms) {
+    return new Date(ms).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', timeZone: 'America/New_York' });
+  }
+
+  function chatMsgHtml(m) {
+    var reacts = CHAT_EMOJIS.map(function (e) {
+      var found = null;
+      (m.reactions || []).forEach(function (r) { if (r.emoji === e) found = r; });
+      var label = e + (found && found.count ? ' ' + found.count : '');
+      return '<button type="button" class="chat-react' + (found && found.mine ? ' on' : '') +
+        '" data-id="' + m.id + '" data-emoji="' + e + '" aria-label="React ' + e + '">' + label + '</button>';
+    }).join('');
+    return '<div class="chat-msg' + (m.mine ? ' mine' : '') + (m.system ? ' system' : '') + '" data-chat-id="' + m.id + '">' +
+      '<span class="chat-name">' + esc(m.name) + '</span>' +
+      '<span class="chat-time">' + fmtChatTime(m.created_at) + ' ET</span>' +
+      '<div class="chat-text">' + m.text + '</div>' +
+      '<div class="chat-react-row">' + reacts + '</div></div>';
+  }
+
+  function fetchChat() {
+    fetch('/api/chat?since=' + lastChatId + '&playerToken=' + encodeURIComponent(playerToken))
+      .then(function (res) { return res.json(); })
+      .then(function (d) {
+        if (!d.ok || !d.messages) return;
+        var list = $('chatList');
+        var empty = $('chatEmpty');
+        var nearBottom = list.scrollHeight - list.scrollTop - list.clientHeight < 80;
+        d.messages.forEach(function (m) {
+          if (chatSeen[m.id]) return;
+          chatSeen[m.id] = true;
+          if (m.id > lastChatId) lastChatId = m.id;
+          if (empty) empty.style.display = 'none';
+          list.insertAdjacentHTML('beforeend', chatMsgHtml(m));
+        });
+        while (list.querySelectorAll('.chat-msg').length > 100) {
+          list.querySelector('.chat-msg').remove();
+        }
+        if (nearBottom) list.scrollTop = list.scrollHeight;
+      })
+      .catch(function () { /* chat is decoration — the game keeps working */ });
+  }
+
+  // Rebuild the whole list (used after a reaction toggle, so counts update).
+  function refreshChat() {
+    lastChatId = 0;
+    chatSeen = {};
+    $('chatList').innerHTML = '<p class="empty-note chat-empty" id="chatEmpty">No chatter yet — say hi and get the party going. 🎉</p>';
+    fetchChat();
+  }
+
+  $('chatList').addEventListener('click', function (e) {
+    var btn = e.target.closest ? e.target.closest('.chat-react') : null;
+    if (!btn) return;
+    var id = parseInt(btn.getAttribute('data-id'), 10);
+    var emoji = btn.getAttribute('data-emoji');
+    fetch('/api/chat/react', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ playerToken: playerToken, messageId: id, emoji: emoji }),
+    }).then(function () { refreshChat(); }).catch(function () {});
+  });
+
+  $('chatForm').addEventListener('submit', function (e) {
+    e.preventDefault();
+    var input = $('chatInput');
+    var msg = $('chatMsg');
+    var text = input.value.trim();
+    msg.className = 'form-msg';
+    msg.textContent = '';
+    if (!text) return;
+    var name = $('nameInput').value.trim();
+    if (!name) {
+      msg.classList.add('err');
+      msg.textContent = 'Enter your name above first, so everyone knows who is chatting.';
+      return;
+    }
+    fetch('/api/chat', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ playerToken: playerToken, name: name, text: text }),
+    })
+      .then(function (res) { return res.json().then(function (d) { return { status: res.status, body: d }; }); })
+      .then(function (r) {
+        if (!r.body.ok) {
+          msg.classList.add('err');
+          msg.textContent = r.body.error || 'Could not send that.';
+          return;
+        }
+        myName = name;
+        localStorage.setItem('stw247_name', myName);
+        input.value = '';
+        fetchChat();
+      })
+      .catch(function () {
+        msg.classList.add('err');
+        msg.textContent = 'Could not reach the game — check your connection and try again.';
+      });
+  });
+
+  // One-tap shouts post just the emoji as a message — a quick cheer with
+  // no typing. Same 3-second pace as a normal message.
+  $('chatShouts').addEventListener('click', function (e) {
+    var btn = e.target.closest ? e.target.closest('.chat-shout') : null;
+    if (!btn) return;
+    var emoji = btn.getAttribute('data-shout');
+    var name = $('nameInput').value.trim();
+    var msg = $('chatMsg');
+    msg.className = 'form-msg';
+    msg.textContent = '';
+    if (!name) {
+      msg.classList.add('err');
+      msg.textContent = 'Enter your name above first, so everyone knows who is cheering.';
+      return;
+    }
+    fetch('/api/chat', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ playerToken: playerToken, name: name, text: emoji }),
+    }).then(function () {
+      myName = name;
+      localStorage.setItem('stw247_name', myName);
+      fetchChat();
+    }).catch(function () {});
   });
 
   // ---- referral copy ----------------------------------------------------------
