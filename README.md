@@ -98,6 +98,17 @@ local test suite (`node test-payments.js`) exercises the charge flow
 against a mock Square server — $5 credits 1 play, $100 credits 22,
 declines and wrong amounts credit 0.
 
+## Live chat (built Nov 7, 2026)
+
+A fun, playful chat panel sits right under the wheel. Players chat with
+the name/token they already have — no new login. Short messages (200
+chars max, one per player every 3 seconds), emoji reactions on every
+message (🎉 🙌 😲 😂 🔥 👀 💯 🍀 — tap to add, tap again to remove), and
+one-tap shouts (Cheer / Wow / LOL / Hot / Lucky). History keeps the
+latest 100 messages. Message text is HTML-escaped on the way out, so no
+one can inject markup. The Wheel itself posts a spin announcement in chat
+when each round closes. `node test-chat.js` runs the chat test suite.
+
 ## How it runs itself
 
 Rounds are 60 minutes, aligned to the America/New_York hour. A tick runs
@@ -143,6 +154,9 @@ a mock Square server (no real charges).
   config, and (with a token) the player's credits and referral info.
 - `POST /api/player` — `{ playerToken, name, ref }` (register/update, capture referral).
 - `POST /api/guess` — `{ playerToken, name, guess }` (1 credit in paid mode).
+- `GET /api/chat?playerToken=…&since=…` — latest 100 chat messages (or everything newer than `since`), with emoji reaction counts.
+- `POST /api/chat` — `{ playerToken, name, text }` (200 chars max, one per player every 3 seconds).
+- `POST /api/chat/react` — `{ playerToken, messageId, emoji }` (toggle one of the 8 allowed emojis on a message).
 - `GET /api/square-config` — `{ enabled, applicationId, locationId }` (public Square IDs only).
 - `POST /api/payments/charge` — `{ playerToken, name, kind, sourceId }` (charges the tokenized card; credits only on a confirmed Square payment).
 - `POST /api/admin/stats` — `{ code }` (Will only; jackpot, house cut, payments status, recent payments).
