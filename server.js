@@ -45,6 +45,12 @@
 // ROUNDS — 60 minutes, aligned to the America/New_York hour. A tick runs
 // every 5 seconds (and on every API call): any round whose end time passed
 // is drawn, winners are paid, and the next round opens. No login.
+//
+// LIVE CHAT — players chat with the name/token they already have
+// (GET /api/chat, POST /api/chat, POST /api/chat/react). Messages are
+// capped at 200 chars, one per player every 3 seconds, history pruned to
+// the latest 100. Text is HTML-escaped on the way out. The Wheel posts a
+// spin announcement in chat when each round closes.
 const express = require('express');
 const path = require('path');
 const fs = require('fs');
@@ -135,6 +141,21 @@ CREATE TABLE IF NOT EXISTS payments (
   verify_note TEXT,
   created_at INTEGER NOT NULL,
   confirmed_at INTEGER
+);
+CREATE TABLE IF NOT EXISTS chat_messages (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  player_token TEXT NOT NULL,
+  name TEXT NOT NULL,
+  text TEXT NOT NULL,
+  created_at INTEGER NOT NULL
+);
+CREATE TABLE IF NOT EXISTS chat_reactions (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  message_id INTEGER NOT NULL,
+  player_token TEXT NOT NULL,
+  emoji TEXT NOT NULL,
+  created_at INTEGER NOT NULL,
+  UNIQUE(message_id, player_token, emoji)
 );
 `);
 
@@ -408,6 +429,20 @@ function closeRound(round, now) {
   ).run(winningNumber, jackpotPaid, split.pot, paidPlays, winnerPayout, split.house,
     split.jackpot, winnerNames, winnerGuess, winnerExact, round.id);
 
+  // The Wheel announces the spin in live chat — the party hears it together.
+  // Guarded: a chat hiccup must never break a round close.
+  try {
+    const spinText = result.type === 'exact'
+      ? `🎉 JACKPOT! Round #${round.id} spun ${winningNumber} — ${winnerNames} takes ${formatCents(winnerPayout)}!`
+      : result.type === 'closest'
+        ? `🎡 Round #${round.id} spun ${winningNumber}! Closest was ${winnerNames} (${winnerGuess}) — wins ${formatCents(winnerPayout)}!`
+        : `🎡 Round #${round.id} spun ${winningNumber} — no guesses that round, the jackpot rolls on!`;
+    db.prepare(
+      'INSERT INTO chat_messages (player_token, name, text, created_at) VALUES (?, ?, ?, ?)'
+    ).run('system', '🎡 Wheel', spinText, now);
+    pruneChat();
+  } catch (e) { /* chat is decoration — the round already closed */ }
+
   console.log(`[spin] round ${round.id} closed — winning number ${winningNumber}, pot ${formatCents(split.pot)} ` +
     (result.type === 'exact' ? `JACKPOT ${formatCents(jackpotPaid)} to ${winnerNames}` :
      result.type === 'closest' ? `closest: ${winnerNames} (${winnerGuess}) wins ${formatCents(winnerPayout)}` :
@@ -573,6 +608,129 @@ app.post('/api/player', (req, res) => {
     referralCreditsEarned: player.referral_credits_earned,
     friendsPaid: friendsPaidCount(player.referral_code),
   });
+});
+
+// ---- live chat (fun + playful, no login) ---------------------------------
+// Players chat with the name/token they already have. Messages are capped
+// at 200 chars, one per player every 3 seconds, and history is pruned to
+// the latest 100. Text is HTML-escaped on the way OUT (the page renders
+// it as-is), so nobody can inject markup. Reactions are a small emoji
+// allowlist, one tap to add, tap again to remove.
+const CHAT_MAX_LEN = 200;
+const CHAT_HISTORY = 100;
+const CHAT_MIN_INTERVAL_MS = 3000;
+const CHAT_EMOJIS = ['🎉', '🙌', '😲', '😂', '🔥', '👀', '💯', '🍀'];
+const lastChatAt = new Map();
+
+function escapeHtml(s) {
+  return String(s).replace(/[&<>"']/g, (c) => ({
+    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
+  }[c]));
+}
+
+function pruneChat() {
+  db.prepare(
+    'DELETE FROM chat_messages WHERE id NOT IN (SELECT id FROM chat_messages ORDER BY id DESC LIMIT ?)'
+  ).run(CHAT_HISTORY);
+  db.prepare(
+    'DELETE FROM chat_reactions WHERE message_id NOT IN (SELECT id FROM chat_messages)'
+  ).run();
+}
+
+// Serialize chat messages with reactions. since=0 returns the latest 100;
+// since=N returns everything newer than N (for polling).
+function chatMessagesFor(token, sinceId) {
+  let rows;
+  if (sinceId > 0) {
+    rows = db.prepare(
+      'SELECT id, player_token, name, text, created_at FROM chat_messages WHERE id > ? ORDER BY id ASC'
+    ).all(sinceId);
+  } else {
+    rows = db.prepare(
+      'SELECT id, player_token, name, text, created_at FROM chat_messages ORDER BY id DESC LIMIT ?'
+    ).all(CHAT_HISTORY).reverse();
+  }
+  if (!rows.length) return [];
+  const ids = rows.map((r) => r.id);
+  const placeholders = ids.map(() => '?').join(',');
+  const reactRows = db.prepare(
+    `SELECT message_id, emoji, COUNT(*) AS n,
+       SUM(CASE WHEN player_token = ? THEN 1 ELSE 0 END) AS mine
+     FROM chat_reactions WHERE message_id IN (${placeholders})
+     GROUP BY message_id, emoji`
+  ).all(token || '', ...ids);
+  const byMessage = {};
+  for (const rr of reactRows) {
+    (byMessage[rr.message_id] = byMessage[rr.message_id] || []).push({
+      emoji: rr.emoji, count: rr.n, mine: rr.mine > 0,
+    });
+  }
+  return rows.map((r) => ({
+    id: r.id,
+    name: r.name,
+    text: escapeHtml(r.text),
+    created_at: r.created_at,
+    mine: !!token && r.player_token === token,
+    system: r.player_token === 'system',
+    reactions: byMessage[r.id] || [],
+  }));
+}
+
+app.get('/api/chat', (req, res) => {
+  const token = normalizeToken(req.query.playerToken);
+  const since = parseInt(req.query.since, 10) || 0;
+  res.json({ ok: true, messages: chatMessagesFor(token, since) });
+});
+
+app.post('/api/chat', throttle(20), (req, res) => {
+  const token = normalizeToken(req.body && req.body.playerToken);
+  if (!token) return res.status(400).json({ ok: false, error: 'Reload the page and try again.' });
+  const text = String((req.body && req.body.text) || '')
+    .replace(/[\u0000-\u001f]/g, '').trim();
+  if (!text) return res.status(400).json({ ok: false, error: 'Say something first.' });
+  if (text.length > CHAT_MAX_LEN) {
+    return res.status(400).json({ ok: false, error: 'Keep it short — 200 characters max.' });
+  }
+  const now = Date.now();
+  const last = lastChatAt.get(token) || 0;
+  if (now - last < CHAT_MIN_INTERVAL_MS) {
+    return res.status(429).json({ ok: false, error: 'Whoa — one message every few seconds. Let the wheel breathe. 😄' });
+  }
+  const name = normalizeName(req.body && req.body.name) || 'Player';
+  ensurePlayer(token, name);
+  const info = db.prepare(
+    'INSERT INTO chat_messages (player_token, name, text, created_at) VALUES (?, ?, ?, ?)'
+  ).run(token, name, text, now);
+  lastChatAt.set(token, now);
+  pruneChat();
+  res.json({ ok: true, id: info.lastInsertRowid });
+});
+
+// Toggle one emoji reaction on a message: tap to add, tap again to remove.
+app.post('/api/chat/react', throttle(20), (req, res) => {
+  const token = normalizeToken(req.body && req.body.playerToken);
+  if (!token) return res.status(400).json({ ok: false, error: 'Reload the page and try again.' });
+  const messageId = parseInt(req.body && req.body.messageId, 10);
+  const emoji = String((req.body && req.body.emoji) || '');
+  if (!CHAT_EMOJIS.includes(emoji)) {
+    return res.status(400).json({ ok: false, error: 'Pick an emoji from the row.' });
+  }
+  const msg = db.prepare('SELECT id FROM chat_messages WHERE id = ?').get(messageId);
+  if (!msg) return res.status(404).json({ ok: false, error: 'That message is gone.' });
+  const existing = db.prepare(
+    'SELECT id FROM chat_reactions WHERE message_id = ? AND player_token = ? AND emoji = ?'
+  ).get(messageId, token, emoji);
+  let reacted;
+  if (existing) {
+    db.prepare('DELETE FROM chat_reactions WHERE id = ?').run(existing.id);
+    reacted = false;
+  } else {
+    db.prepare(
+      'INSERT INTO chat_reactions (message_id, player_token, emoji, created_at) VALUES (?, ?, ?, ?)'
+    ).run(messageId, token, emoji, Date.now());
+    reacted = true;
+  }
+  res.json({ ok: true, reacted, messageId, emoji });
 });
 
 app.post('/api/guess', throttle(10), (req, res) => {
