@@ -112,6 +112,22 @@ h1.title {
 .result-banner.jackpot-hit .big { color: var(--cyan); text-shadow: 0 0 16px rgba(34, 211, 238, .8); }
 .spin-note { text-align: center; color: var(--muted); font-size: 14px; margin-top: 8px; }
 
+/* Jackpot bonus spin — celebratory panel by the wheel, shown only to a
+   jackpot winner with a pending bonus spin (or its just-finished
+   outcome). Gold + cyan glow, matching the jackpot-hit banner. */
+.bonus-spin-panel {
+  margin-top: 12px; border-radius: 12px; padding: 16px 14px; text-align: center;
+  border: 1px solid rgba(245, 158, 11, .65); background: rgba(245, 158, 11, .10);
+  box-shadow: 0 0 24px rgba(245, 158, 11, .25), inset 0 0 18px rgba(34, 211, 238, .08);
+}
+.bonus-spin-text { margin: 0 0 12px; font-size: 19px; font-weight: 700; line-height: 1.35; }
+.bonus-spin-text b { color: var(--amber); text-shadow: 0 0 12px rgba(245, 158, 11, .6); }
+.bonus-spin-btn { display: block; width: 100%; font-size: 19px; padding: 16px 18px; }
+.bonus-spin-msg { font-size: 19px; font-weight: 700; line-height: 1.35; }
+.bonus-spin-msg:empty { display: none; }
+.bonus-spin-msg b { color: var(--cyan); text-shadow: 0 0 12px rgba(34, 211, 238, .6); }
+.bonus-spin-msg.err { color: #f87171; }
+
 /* Demo spin — tap-to-spin preview. Big neon button under the wheel; the
    wheel itself is tappable too (cursor shows it). Disabled while any
    spin is running, via the shared .btn:disabled style. */
