@@ -17,6 +17,7 @@
 
   var rot = 0;
   var spinning = false;
+  var demoSpinRunning = false;
   var spinStart = 0, spinFrom = 0, spinTo = 0;
   var holdUntil = 0;
   var lastRoundId = null;
@@ -118,8 +119,25 @@
     spinTo = rot + 5 * TAU + delta;
     spinStart = performance.now();
     spinning = true;
+    demoSpinRunning = false; // a fresh spin (the real round close) takes over any demo
     lastPointerIdx = pointerIndex(rot);
     lastTickAt = 0;
+  }
+
+  // ---- demo spin (tap-to-spin preview) ------------------------------------
+  // The wheel only spins for real when a round closes, but players tap
+  // it expecting it to move — so the button below the wheel (and the
+  // wheel itself) runs the exact same animation + ticking sound with a
+  // random landing number. It is purely visual: it calls no endpoint and
+  // touches no round, pot, jackpot, guess or credit. A real round-close
+  // spin always wins — render() calls startSpinAnimation() directly,
+  // which clears demoSpinRunning and takes the animation over.
+  function demoSpin() {
+    if (spinning) return; // a spin (real or demo) is already running
+    ensureAudio();
+    spinResult = null; // demo ends with a single soft ding, not a fanfare
+    startSpinAnimation(Math.floor(Math.random() * SEGMENTS));
+    demoSpinRunning = true;
   }
 
   function frame(now) {
@@ -138,10 +156,12 @@
         holdUntil = now + 25000;
         playResultSound(spinResult);
         spinResult = null;
+        demoSpinRunning = false;
       }
     } else if (now > holdUntil) {
       rot += 0.00035;
     }
+    refreshDemoBtn();
     drawWheel();
     updateReadout();
     requestAnimationFrame(frame);
@@ -183,7 +203,7 @@
   document.addEventListener('keydown', ensureAudio);
 
   function playNote(freq, startOffset, dur, type, vol) {
-    if (!audioCtx || !masterGain) return;
+    if (!soundOn || !audioCtx || !masterGain) return;
     try {
       var t = audioCtx.currentTime + startOffset;
       var osc = audioCtx.createOscillator();
@@ -206,7 +226,7 @@
   // speed, and the throttle is what makes it sound like a ratchet
   // instead of a buzz.
   function playTick(speed) {
-    if (!audioCtx || !masterGain) return;
+    if (!soundOn || !audioCtx || !masterGain) return;
     var now = performance.now();
     if (now - lastTickAt < 40) return;
     lastTickAt = now;
@@ -933,6 +953,24 @@
   });
   refreshSoundToggle();
 
+  // ---- demo spin button -----------------------------------------------------
+  // Big button under the wheel + tapping the wheel itself — both run the
+  // same demoSpin() above. The button disables itself while any spin is
+  // running (real or demo) and re-enables when it finishes; the label
+  // flips to "Spinning…" meanwhile. State is only touched when it
+  // changes, so the frame loop calling this every frame stays cheap.
+  var demoSpinBtn = $('demoSpinBtn');
+  var demoBtnSpinning = null;
+  function refreshDemoBtn() {
+    if (!demoSpinBtn || demoBtnSpinning === spinning) return;
+    demoBtnSpinning = spinning;
+    demoSpinBtn.disabled = spinning;
+    demoSpinBtn.textContent = spinning ? '🎡 Spinning…' : '🎡 Spin it now';
+  }
+  if (demoSpinBtn) demoSpinBtn.addEventListener('click', demoSpin);
+  canvas.addEventListener('click', demoSpin);
+  refreshDemoBtn();
+
   // Tiny handle for headless smoke tests (sound functions + toggle state).
   var tickCount = 0;
   window.__stw247 = window.__stw247 || {};
@@ -945,6 +983,8 @@
     tickCount: function () { return tickCount; },
   };
   window.__stw247.spin = startSpinAnimation;
+  window.__stw247.demoSpin = demoSpin;
+  window.__stw247.isDemoSpinning = function () { return demoSpinRunning; };
   window.__stw247.isSpinning = function () { return spinning; };
 
   // ---- referral copy ----------------------------------------------------------
