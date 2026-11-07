@@ -157,6 +157,7 @@
         playResultSound(spinResult);
         spinResult = null;
         demoSpinRunning = false;
+        if (onSpinEnd) { var cb = onSpinEnd; onSpinEnd = null; cb(); }
       }
     } else if (now > holdUntil) {
       rot += 0.00035;
@@ -331,6 +332,10 @@
       $('refStats').textContent = 'Free plays earned: ' + state.me.referralCreditsEarned +
         ' • Friends who paid: ' + state.me.friendsPaid;
     }
+
+    // Jackpot bonus spin: state.me carries the pending spin, if any.
+    bonusSpinPending = state.me && state.me.jackpotSpin ? state.me.jackpotSpin : null;
+    renderBonusPanel();
 
     // Round changed → the previous round just spun.
     if (lastRoundId !== null && state.round.id !== lastRoundId && state.lastResult) {
@@ -975,6 +980,109 @@
   window.__stw247.demoSpin = demoSpin;
   window.__stw247.isDemoSpinning = function () { return demoSpinRunning; };
   window.__stw247.isSpinning = function () { return spinning; };
+
+  // ---- jackpot bonus spin ---------------------------------------------------
+  // Hitting the exact number earns ONE bonus spin, which waits on the
+  // server until the winner takes it (state.me.jackpotSpin). Taking it
+  // calls POST /api/jackpot-spin — the SERVER draws the result — and the
+  // wheel then animates to that number with the usual ticks. Landing
+  // within 5 of the winning number pays +10 free plays (credited
+  // server-side); the jackpot payout itself never depends on this spin.
+  var bonusSpinPending = null; // latest pending spin seen in state.me
+  var bonusSpinBusy = false;   // request/animation in progress
+  var bonusSpinOutcome = null; // { spinId, html } — kept on screen after a spin
+  var onSpinEnd = null;        // one-shot callback fired when a spin animation ends
+
+  function renderBonusPanel() {
+    var panel = $('bonusSpinPanel');
+    if (!panel) return;
+    var pending = bonusSpinPending;
+    if (bonusSpinBusy) {
+      panel.style.display = '';
+      var busyBtn = $('bonusSpinBtn');
+      busyBtn.style.display = '';
+      busyBtn.disabled = true;
+      busyBtn.textContent = '🎡 Spinning…';
+      return;
+    }
+    if (pending && (!bonusSpinOutcome || bonusSpinOutcome.spinId !== pending.id)) {
+      panel.style.display = '';
+      $('bonusSpinText').innerHTML = '🎰 <b>JACKPOT!</b> You hit <b>' + pending.winningNumber +
+        '</b> and won the jackpot' +
+        (pending.jackpotCents > 0 ? ' (' + money(pending.jackpotCents) + ')' : '') +
+        '. Take your <b>BONUS SPIN</b> — land within 5 of ' + pending.winningNumber +
+        ' and win <b>10 FREE plays</b>!';
+      var btn = $('bonusSpinBtn');
+      btn.style.display = '';
+      btn.disabled = false;
+      btn.textContent = '🎰 Take my BONUS SPIN';
+      $('bonusSpinMsg').innerHTML = '';
+      $('bonusSpinMsg').classList.remove('err');
+      return;
+    }
+    if (bonusSpinOutcome) {
+      panel.style.display = '';
+      $('bonusSpinText').innerHTML = '';
+      $('bonusSpinBtn').style.display = 'none';
+      $('bonusSpinMsg').innerHTML = bonusSpinOutcome.html;
+      return;
+    }
+    panel.style.display = 'none';
+  }
+
+  function takeBonusSpin() {
+    if (bonusSpinBusy || spinning || !bonusSpinPending) return;
+    var spin = bonusSpinPending;
+    bonusSpinBusy = true;
+    bonusSpinOutcome = null;
+    renderBonusPanel();
+    ensureAudio();
+    fetch('/api/jackpot-spin', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ playerToken: playerToken, spinId: spin.id }),
+    })
+      .then(function (res) { return res.json().then(function (d) { return { status: res.status, body: d }; }); })
+      .then(function (r) {
+        var d = r.body;
+        if (!d.ok) {
+          bonusSpinBusy = false;
+          bonusSpinOutcome = {
+            spinId: spin.id,
+            html: esc(d.error || 'That bonus spin could not be taken.'),
+          };
+          renderBonusPanel();
+          $('bonusSpinMsg').classList.add('err');
+          poll();
+          return;
+        }
+        // Animate to the number the server drew — jackpot chime if the
+        // spin landed inside the +10-plays window.
+        spinResult = d.withinWindow ? { winner_exact: true } : null;
+        startSpinAnimation(d.resultNumber);
+        onSpinEnd = function () {
+          bonusSpinBusy = false;
+          bonusSpinOutcome = {
+            spinId: d.spinId,
+            html: d.withinWindow
+              ? '🎉 You landed <b>' + d.resultNumber + '</b> — within 5 of ' + d.winningNumber +
+                '! <b>10 free plays</b> added to your account.'
+              : 'You landed <b>' + d.resultNumber + '</b> — outside the window this time. The jackpot is still yours!',
+          };
+          renderBonusPanel();
+          poll(); // refresh credits and clear the (now used) offer
+        };
+      })
+      .catch(function () {
+        bonusSpinBusy = false;
+        bonusSpinOutcome = { spinId: spin.id, html: 'Could not reach the game — check your connection and try again.' };
+        renderBonusPanel();
+        $('bonusSpinMsg').classList.add('err');
+      });
+  }
+
+  var bonusSpinBtn = $('bonusSpinBtn');
+  if (bonusSpinBtn) bonusSpinBtn.addEventListener('click', takeBonusSpin);
 
   // ---- referral copy ----------------------------------------------------------
   $('copyRefBtn').addEventListener('click', function () {
