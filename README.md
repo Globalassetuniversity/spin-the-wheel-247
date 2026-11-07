@@ -122,7 +122,9 @@ sounds only start after the first interaction. The choice is saved in
 localStorage (`stw247_sound`) and sticks between visits. Volume is
 modest (master gain 0.18). All sound code lives in `public/app.js`
 (sound engine + `playTick` / `playResultSound` hooks in the spin
-animation); no server change was needed.
+animation); no server change was needed. `node test-sounds.js` runs
+the sound smoke test (fake AudioContext + stubbed DOM: toggle,
+all sound functions, ticks during a real spin animation).
 
 ## How it runs itself
 
