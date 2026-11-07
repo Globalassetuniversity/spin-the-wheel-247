@@ -77,20 +77,23 @@
         </div>
         <p class="credit-note" id="creditNote">1 credit = 1 guess. Free plays are spent first.</p>
         <div id="buyBox">
-          <a class="btn buy-btn" id="buySingleBtn" href="#" target="_blank" rel="noopener">Buy 1 play — $5</a>
-          <a class="btn buy-btn bundle" id="buyBundleBtn" href="#" target="_blank" rel="noopener">$100 = 22 plays (2 FREE)</a>
-          <p class="buy-note" id="buyNote">Pay securely with Square — you'll come right back here to claim your plays.</p>
+          <button class="btn buy-btn" id="buySingleBtn" type="button">Buy 1 play — $5</button>
+          <button class="btn buy-btn bundle" id="buyBundleBtn" type="button">$100 = 22 plays (2 FREE)</button>
+          <p class="buy-note" id="buyNote">Pay with Apple Pay or your card right here — no leaving the game. Secure checkout by Square.</p>
         </div>
-        <div id="claimBox" class="claim-box" style="display:none">
-          <h3>Claim your plays</h3>
-          <p class="muted" id="claimText">Paid on Square? Paste your order ID and claim your plays.</p>
-          <input id="claimOrderId" type="text" placeholder="Square order ID (from your receipt)" autocomplete="off">
-          <input id="claimReceipt" type="text" placeholder="Receipt number (optional)" autocomplete="off" style="margin-top:8px">
-          <div class="row" style="margin-top:10px">
-            <button class="btn" id="claimSingleBtn" type="button">Claim 1 play ($5)</button>
-            <button class="btn" id="claimBundleBtn" type="button">Claim bundle ($100)</button>
+        <div id="checkoutBox" class="checkout-box" style="display:none">
+          <h3 id="checkoutTitle">Pay $5 — 1 play</h3>
+          <p class="muted">Charged securely by Square. You stay right here — no redirect, no new tab.</p>
+          <div id="apple-pay-wrap" style="display:none">
+            <button id="apple-pay-button" type="button" aria-label="Pay with Apple Pay"></button>
+            <p class="or-divider">or pay by card</p>
           </div>
-          <div class="form-msg" id="claimMsg"></div>
+          <div id="card-container"></div>
+          <div class="row" style="margin-top:12px">
+            <button class="btn" id="payBtn" type="button" disabled>Pay $5.00</button>
+            <button class="btn ghost" id="cancelPayBtn" type="button">Cancel</button>
+          </div>
+          <div class="form-msg" id="payMsg"></div>
         </div>
       </div>
 
@@ -142,7 +145,7 @@
   <div class="card section">
     <h2>How to Play</h2>
     <div class="steps">
-      <div class="step"><div class="n">1</div><p><b>Buy plays — $5 each</b>, or the $100 bundle for 22 plays. Your credits stay on your account across rounds.</p></div>
+      <div class="step"><div class="n">1</div><p><b>Buy plays — $5 each</b>, or the $100 bundle for 22 plays. Pay with Apple Pay or your card right here on the page — no leaving the game. Your credits stay on your account across rounds.</p></div>
       <div class="step"><div class="n">2</div><p><b>Pick a number 0–100</b> for this round. Use more than one play if you want — just pick different numbers.</p></div>
       <div class="step"><div class="n">3</div><p><b>The wheel spins itself</b> at the top of the hour. Closest guess wins 70% of the pot; hit it exact and take the jackpot too.</p></div>
     </div>

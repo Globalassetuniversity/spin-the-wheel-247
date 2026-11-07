@@ -25,57 +25,75 @@ hour (Eastern Time) — nobody has to press anything or be live.
   round are fine as long as each number is different.
 - All money is integer cents in the code — no float rounding.
 
-## Payments — Square (status: built, NOT switched on)
+## Payments — Square embedded checkout (status: built, NOT switched on)
 
-The game ships in **free preview mode** (`payments.json` → `"mode": "free"`):
-plays are free and add $0 to the pot. Nothing about payments is live until
-Will does the steps below — the page says so plainly while it is off.
+The game ships in **free preview mode**: plays are free and add $0 to the
+pot. Nothing about payments is live until Will does the steps below — the
+page says so plainly while it is off.
 
 ### How payment works (once switched on)
 
-1. Player taps **Buy 1 play — $5** or **$100 = 22 plays (2 FREE)**. A Square
-   payment link opens in a new tab; the player pays there.
-2. Square sends the player back to the game with the order ID attached.
-   The player taps **Claim** (single or bundle). The claim is `pending`.
-3. The claim is CONFIRMED — and only then are credits issued — in one of
-   two ways:
-   - **(a) Square auto-verify (best, fully self-running):** if
-     `SQUARE_ACCESS_TOKEN` is set on the server, the server checks the
-     order with the Square Orders API and confirms it automatically when
-     the order is COMPLETED for the exact amount. A used order ID can only
-     ever credit once.
-   - **(b) Will confirms in `/admin`:** open `/admin`, enter the
-     `ADMIN_CODE`, match the player's name/amount/time against the Square
-     sale, tap **Confirm**. (Needed only when no Square token is set, or
-     when auto-verify could not confirm an order.)
-4. A redirect URL alone never credits anyone — it can be faked by typing
-   it in. A guess only counts once its credit is issued.
+1. Player taps **Buy 1 play — $5** or **$100 = 22 plays (2 FREE)**. A
+   secure card form (Square Web Payments SDK) opens **right on the game
+   page** — the player never leaves the site, no redirect, no new tab.
+   The card number is tokenized by Square in the browser; it never
+   touches this server.
+2. The server charges the card via the Square Payments API
+   (`POST /v2/payments`) with an idempotency key, and checks the result:
+   status must be `COMPLETED`, currency `USD`, amount exactly **$5.00**
+   (single) or **$100.00** (bundle). Only then are the plays added —
+   instantly, no manual step. A declined card or a wrong amount adds 0
+   plays. A Square payment ID can only ever add plays once.
+3. The old payment-link redirect flow (`?paid=single|bundle` + claim) is
+   retired — embedded checkout is the only payment path.
+
+### Apple Pay (built, needs one Square step to go live)
+
+On an iPhone or Mac in Safari, an **Apple Pay button** appears above the
+card form in the checkout panel — the player pays with Face ID / Touch ID
+and the token goes through the exact same server charge path as a card
+token (same $5 / $100 amounts, same verification, same credits). On any
+other browser or device the button stays hidden and the card form works
+as before. Two pieces make it work:
+
+- **Domain verification file** — already in the repo at
+  `public/.well-known/apple-developer-merchantid-domain-association`
+  (downloaded from Square) and served by the game server at
+  `/.well-known/apple-developer-merchantid-domain-association`.
+  Square updates this file from time to time — if Apple Pay ever stops
+  verifying, re-download it from
+  https://app.squareup.com/digital-wallets/apple-pay/apple-developer-merchantid-domain-association.
+- **Domain registration (still to do)** — in the Square Developer
+  Console, open the app, switch to **Production**, choose **Apple Pay**
+  in the left pane, and **Add Domain** for
+  `spin-the-wheel-247-production.up.railway.app`. Apple Pay stays hidden
+  until that is done; card payments are unaffected.
 
 ### Switching payments on — Will's steps
 
-1. **In Square Dashboard** (phone or computer): go to **Payments** (or
-   **Orders & payments**) → **Payment Links** → **Create link**.
-   - Link 1: purpose **Collect a payment** (or **Take a payment**), title
-     e.g. `Wheel Play — 1 play`, amount **$5.00**, one-time. In **Advanced
-     settings** turn on **Redirect to a website after checkout** and enter
-     the game URL + `?paid=single` (e.g.
-     `https://YOUR-GAME-URL/?paid=single`). Save → **Copy link**.
-   - Link 2: same flow, title e.g. `Wheel Bundle — 22 plays`, amount
-     **$100.00**, redirect URL the game URL + `?paid=bundle`. Save → copy.
-2. **Send the two links to Muse** (paste them in chat is fine — they are
-   public checkout links, not secrets). Muse puts them in `payments.json`
-   (`singlePlayUrl`, `bundleUrl`) and sets `"mode": "link"`, then redeploys.
-3. **(Optional but recommended — makes it fully self-running)** Connect
-   Square for auto-verify: in Square Dashboard → **Settings → Developer →
-   API keys** (or **Developer Dashboard → Applications → your app**), copy
-   the **production Access Token** and give it to Muse through the **secure
-   form** (never paste it in chat). Muse sets it as the `SQUARE_ACCESS_TOKEN`
-   environment variable on Railway. Without it, every payment waits for Will
-   to tap Confirm in `/admin`.
-4. **Set the admin code:** pick a private code and give it to Muse through
-   the secure form (never in chat). Muse sets it as the `ADMIN_CODE`
-   environment variable on Railway. `/admin` is how Will confirms payments
-   when auto-verify is off.
+1. **In Square Dashboard** (phone or computer): **Settings → Developer
+   → API keys** (or **Developer Dashboard → Applications → your app**).
+   You need three values from the **production** app:
+   - **Application ID** (public) — the page needs it to load the card form.
+   - **Location ID** (public) — found under **Locations** in the Square
+     Dashboard (or in the Developer Dashboard); this is the location
+     payments settle to.
+   - **Production Access Token** (secret).
+2. **Give all three to Muse through the secure form** (never paste the
+   token in chat). Muse sets them as environment variables on Railway:
+   `SQUARE_APPLICATION_ID`, `SQUARE_LOCATION_ID`,
+   `SQUARE_ACCESS_TOKEN`. When all three are set, card payments go live
+   on the next deploy — no payment links to create, no code change.
+3. **Set the admin code:** pick a private code and give it to Muse
+   through the secure form (never in chat). Muse sets it as the
+   `ADMIN_CODE` environment variable on Railway. `/admin` is a read-only
+   view of the jackpot, house cut, and recent payments.
+
+**Test before going live:** Square sandbox cards (e.g. `4111 1111 1111
+1111`, any future expiry, any CVV) work with sandbox credentials. The
+local test suite (`node test-payments.js`) exercises the charge flow
+against a mock Square server — $5 credits 1 play, $100 credits 22,
+declines and wrong amounts credit 0.
 
 ## How it runs itself
 
@@ -94,8 +112,11 @@ npm start            # http://localhost:3000
 
 `ROUND_MINUTES=1 npm start` runs 1-minute rounds (for testing the spin cycle).
 `DB_PATH` sets the SQLite file (default `./data.db`).
-`ADMIN_CODE` enables `/admin`. `SQUARE_ACCESS_TOKEN` turns on Square
-auto-verify. `SQUARE_API_BASE` overrides the Square API host (testing only).
+`ADMIN_CODE` enables `/admin`. Square card payments go live when all three
+are set: `SQUARE_APPLICATION_ID`, `SQUARE_LOCATION_ID`,
+`SQUARE_ACCESS_TOKEN`. `SQUARE_API_BASE` overrides the Square API host
+(testing only). `node test-payments.js` runs the payment test suite against
+a mock Square server (no real charges).
 
 ## Deploy to Railway (new service)
 
@@ -104,7 +125,8 @@ auto-verify. `SQUARE_API_BASE` overrides the Square API host (testing only).
 2. Add a **Volume**, mount path `/data`.
 3. Variables: `DB_PATH=/data/data.db`. Railway sets `PORT` itself.
    Optional: `ADMIN_CODE` (a private code for `/admin`),
-   `SQUARE_ACCESS_TOKEN` (Square production token, for auto-verify).
+   `SQUARE_APPLICATION_ID` + `SQUARE_LOCATION_ID` +
+   `SQUARE_ACCESS_TOKEN` (Square production credentials, for card payments).
 4. Deploy. Open the Railway-generated URL — the game is live immediately;
    the first round opens on first boot and spins at the next hour.
 5. Railway needs the **Hobby plan ($5/month)** for the volume to persist
@@ -118,7 +140,8 @@ auto-verify. `SQUARE_API_BASE` overrides the Square API host (testing only).
   config, and (with a token) the player's credits and referral info.
 - `POST /api/player` — `{ playerToken, name, ref }` (register/update, capture referral).
 - `POST /api/guess` — `{ playerToken, name, guess }` (1 credit in paid mode).
-- `POST /api/payments/claim` — `{ playerToken, name, kind, orderId, receiptRef }`.
-- `POST /api/admin/claims|confirm|reject` — `{ code, ... }` (Will only).
+- `GET /api/square-config` — `{ enabled, applicationId, locationId }` (public Square IDs only).
+- `POST /api/payments/charge` — `{ playerToken, name, kind, sourceId }` (charges the tokenized card; credits only on a confirmed Square payment).
+- `POST /api/admin/stats` — `{ code }` (Will only; jackpot, house cut, payments status, recent payments).
 - `GET /api/health` — `{ "ok": true }`.
-- `GET /admin` — the payment-confirmation page for Will.
+- `GET /admin` — the read-only stats page for Will.

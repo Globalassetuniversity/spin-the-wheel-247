@@ -1,6 +1,7 @@
 // app.js — frontend for Spin the Wheel 24/7 (paid plays + credits + referrals).
 // Polls /api/state, draws the neon wheel, animates the spin when a round
-// closes, and handles buying, claiming, guessing, and referrals.
+// closes, and handles buying (embedded Square card checkout — the player
+// pays right on the page, no redirect), guessing, and referrals.
 (function () {
   'use strict';
 
@@ -35,8 +36,6 @@
 
   var params = new URLSearchParams(window.location.search);
   var refParam = (params.get('ref') || '').trim().toUpperCase();
-  var paidParam = (params.get('paid') || '').trim().toLowerCase();
-  var orderParam = (params.get('orderId') || params.get('order_id') || '').trim();
 
   // ---- wheel --------------------------------------------------------------
   function mod(n, m) { return ((n % m) + m) % m; }
@@ -170,25 +169,11 @@
       banner.style.display = '';
       banner.innerHTML = '<b>FREE PREVIEW</b> — payments are being connected. Plays are free right now and add $0 to the pot. Paid play ($5) and the $100 bundle start soon.';
       buyBox.style.display = 'none';
-      $('claimBox').style.display = 'none';
+      $('checkoutBox').style.display = 'none';
     } else {
       banner.style.display = 'none';
       buyBox.style.display = '';
-      var singleBtn = $('buySingleBtn');
-      var bundleBtn = $('buyBundleBtn');
-      if (state.payments.enabled) {
-        singleBtn.href = state.payments.singlePlayUrl;
-        bundleBtn.href = state.payments.bundleUrl;
-        singleBtn.classList.remove('disabled');
-        bundleBtn.classList.remove('disabled');
-        $('buyNote').textContent = 'Pay securely with Square — you\'ll come right back here to claim your plays.';
-      } else {
-        singleBtn.href = '#';
-        bundleBtn.href = '#';
-        singleBtn.classList.add('disabled');
-        bundleBtn.classList.add('disabled');
-        $('buyNote').textContent = 'Payment links are being set up — check back shortly.';
-      }
+      $('buyNote').textContent = 'Pay with Apple Pay or your card right here — no leaving the game. Secure checkout by Square.';
     }
 
     // Credits
@@ -304,51 +289,230 @@
     }).then(function (res) { return res.json(); }).catch(function () { return null; });
   }
 
-  // ---- claim flow -----------------------------------------------------------
-  var claimBox = $('claimBox');
-  function showClaim(kind) {
-    claimBox.style.display = '';
-    $('claimText').textContent = kind === 'bundle'
-      ? 'Paid $100 on Square? Claim your 22 plays (20 paid + 2 free).'
-      : 'Paid $5 on Square? Claim your 1 play.';
-    claimBox.dataset.kind = kind;
-    if (orderParam) $('claimOrderId').value = orderParam;
-    claimBox.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  // ---- embedded checkout (Square Web Payments SDK) -------------------
+  // The card form lives on this page, and on Apple devices an Apple Pay
+  // button appears above it. Square tokenizes the card / Apple Pay
+  // payment in the browser and hands us a one-time source ID — the card
+  // number never touches this site. The server charges it and only then
+  // adds plays. Apple Pay only renders on Safari on an Apple device with
+  // Apple Pay set up; everywhere else the button stays hidden and the
+  // card form works exactly as before.
+  var squareCard = null;
+  var squareApplePay = null;
+  var squarePayments = null;
+  var squareLoading = null;
+  var selectedKind = 'single';
+  var SQUARE_SDK_URL = 'https://web.squarecdn.com/v1/square.js';
+
+  function loadSquareSdk() {
+    if (window.Square) return Promise.resolve();
+    if (squareLoading) return squareLoading;
+    squareLoading = new Promise(function (resolve, reject) {
+      var s = document.createElement('script');
+      s.src = SQUARE_SDK_URL;
+      s.onload = resolve;
+      s.onerror = function () { reject(new Error('sdk')); };
+      document.head.appendChild(s);
+    });
+    return squareLoading;
   }
-  if (paidParam === 'single' || paidParam === 'bundle') {
-    showClaim(paidParam);
-    // Clean the Square redirect params out of the address bar.
-    var clean = window.location.origin + window.location.pathname + (refParam ? '?ref=' + refParam : '');
-    window.history.replaceState({}, '', clean);
+
+  // The Square payments instance (one per page load), shared by the card
+  // form and Apple Pay. Null when payments are not live.
+  function getSquarePayments() {
+    if (squarePayments) return Promise.resolve(squarePayments);
+    return fetch('/api/square-config')
+      .then(function (res) { return res.json(); })
+      .then(function (cfg) {
+        if (!cfg.enabled || !cfg.applicationId || !cfg.locationId) return null;
+        return loadSquareSdk().then(function () {
+          squarePayments = window.Square.payments(cfg.applicationId, cfg.locationId);
+          return squarePayments;
+        });
+      })
+      .catch(function () { return null; });
   }
-  $('claimSingleBtn').addEventListener('click', function () { submitClaim('single'); });
-  $('claimBundleBtn').addEventListener('click', function () { submitClaim('bundle'); });
-  function submitClaim(kind) {
-    var msg = $('claimMsg');
-    msg.className = 'form-msg';
-    msg.textContent = '';
-    var name = $('nameInput').value.trim();
-    if (!name) { msg.classList.add('err'); msg.textContent = 'Enter your name above first, so the plays go to the right player.'; return; }
-    msg.textContent = 'Claiming…';
-    fetch('/api/payments/claim', {
+
+  function initCard() {
+    // Returns a promise for the attached card object (or null if payments
+    // are not live). Attaches lazily — only once the checkout panel is
+    // visible, so the card iframe sizes correctly.
+    if (squareCard) return Promise.resolve(squareCard);
+    return getSquarePayments().then(function (payments) {
+      if (!payments) return null;
+      return payments.card().then(function (card) {
+        return card.attach('#card-container').then(function () {
+          squareCard = card;
+          return card;
+        });
+      });
+    });
+  }
+
+  // Apple Pay needs a payment request up front (country, currency, and
+  // the exact amount for this purchase), so it is (re)built every time
+  // the checkout panel opens for a kind. Any failure — not Safari, no
+  // Apple Pay set up, domain not registered with Square yet — just hides
+  // the button; the card form is unaffected.
+  function initApplePay(kind) {
+    var wrap = $('apple-pay-wrap');
+    wrap.style.display = 'none';
+    squareApplePay = null;
+    return getSquarePayments().then(function (payments) {
+      if (!payments) return null;
+      var isBundle = kind === 'bundle';
+      var paymentRequest = payments.paymentRequest({
+        countryCode: 'US',
+        currencyCode: 'USD',
+        total: {
+          amount: isBundle ? '100.00' : '5.00',
+          label: isBundle ? 'Spin the Wheel 24/7 — 22 plays' : 'Spin the Wheel 24/7 — 1 play',
+        },
+      });
+      return payments.applePay(paymentRequest).then(function (applePay) {
+        squareApplePay = applePay;
+        wrap.style.display = '';
+        return applePay;
+      });
+    }).catch(function () {
+      wrap.style.display = 'none';
+      squareApplePay = null;
+      return null;
+    });
+  }
+
+  // Send a tokenized payment (card nonce or Apple Pay token — the server
+  // charges both the same way) to /api/payments/charge. Only a confirmed
+  // Square payment adds plays; anything else leaves credits untouched.
+  function submitCharge(sourceId, name) {
+    var msg = $('payMsg');
+    var btn = $('payBtn');
+    btn.disabled = true;
+    return fetch('/api/payments/charge', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        playerToken: playerToken, name: name, kind: kind,
-        orderId: $('claimOrderId').value.trim() || undefined,
-        receiptRef: $('claimReceipt').value.trim() || undefined,
+        playerToken: playerToken, name: name, kind: selectedKind,
+        sourceId: sourceId,
       }),
     })
-      .then(function (res) { return res.json(); })
-      .then(function (d) {
-        if (!d.ok) { msg.classList.add('err'); msg.textContent = d.error || 'Something went wrong.'; return; }
-        msg.classList.add(d.status === 'confirmed' ? 'ok' : '');
-        msg.textContent = d.message || '';
-        if (d.status === 'confirmed') { $('claimOrderId').value = ''; $('claimReceipt').value = ''; }
+      .then(function (res) { return res.json().then(function (d) { return { status: res.status, body: d }; }); })
+      .then(function (r) {
+        var d = r.body;
+        btn.disabled = false;
+        if (!d.ok) {
+          msg.classList.add('err');
+          msg.textContent = d.error || 'Something went wrong with the payment.';
+          return;
+        }
+        msg.classList.add('ok');
+        msg.textContent = d.message || 'Payment confirmed — plays added.';
+        myName = name;
+        localStorage.setItem('stw247_name', myName);
         poll();
       })
-      .catch(function () { msg.classList.add('err'); msg.textContent = 'Could not reach the game — try again.'; });
+      .catch(function () {
+        btn.disabled = false;
+        msg.classList.add('err');
+        msg.textContent = 'Could not reach the game — check your connection and try again.';
+      });
   }
+
+  function showCheckout(kind) {
+    if (!lastState || lastState.payments.mode !== 'embedded') return;
+    selectedKind = kind;
+    var box = $('checkoutBox');
+    var msg = $('payMsg');
+    msg.className = 'form-msg';
+    msg.textContent = '';
+    var isBundle = kind === 'bundle';
+    $('checkoutTitle').textContent = isBundle ? 'Pay $100 — 22 plays (2 FREE)' : 'Pay $5 — 1 play';
+    $('payBtn').textContent = isBundle ? 'Pay $100.00' : 'Pay $5.00';
+    $('payBtn').disabled = true;
+    box.style.display = '';
+    box.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    initCard().then(function (card) {
+      if (!card) {
+        msg.classList.add('err');
+        msg.textContent = 'Could not load the secure payment form — check your connection and try again.';
+        return;
+      }
+      $('payBtn').disabled = false;
+    });
+    // Apple Pay appears only where it is supported; failure is silent.
+    initApplePay(kind);
+  }
+
+  $('buySingleBtn').addEventListener('click', function () { showCheckout('single'); });
+  $('buyBundleBtn').addEventListener('click', function () { showCheckout('bundle'); });
+  $('cancelPayBtn').addEventListener('click', function () {
+    $('checkoutBox').style.display = 'none';
+    $('payMsg').className = 'form-msg';
+    $('payMsg').textContent = '';
+  });
+
+  $('payBtn').addEventListener('click', function () {
+    var msg = $('payMsg');
+    msg.className = 'form-msg';
+    msg.textContent = '';
+    var name = $('nameInput').value.trim();
+    if (!name) {
+      msg.classList.add('err');
+      msg.textContent = 'Enter your name below first, so the plays go to the right player.';
+      return;
+    }
+    if (!squareCard) { msg.classList.add('err'); msg.textContent = 'Payment form is not ready yet — try again in a second.'; return; }
+    var btn = $('payBtn');
+    btn.disabled = true;
+    msg.textContent = 'Processing your payment…';
+    squareCard.tokenize().then(function (result) {
+      if (result.status !== 'OK') {
+        var first = (result.errors && result.errors[0]) || {};
+        btn.disabled = false;
+        msg.classList.add('err');
+        msg.textContent = first.message || 'Your card could not be read — check the details and try again.';
+        return;
+      }
+      submitCharge(result.token, name);
+    }).catch(function () {
+      btn.disabled = false;
+      msg.classList.add('err');
+      msg.textContent = 'Could not reach the game — check your connection and try again.';
+    });
+  });
+
+  $('apple-pay-button').addEventListener('click', function (event) {
+    event.preventDefault();
+    var msg = $('payMsg');
+    msg.className = 'form-msg';
+    msg.textContent = '';
+    var name = $('nameInput').value.trim();
+    if (!name) {
+      msg.classList.add('err');
+      msg.textContent = 'Enter your name below first, so the plays go to the right player.';
+      return;
+    }
+    if (!squareApplePay) {
+      msg.classList.add('err');
+      msg.textContent = 'Apple Pay is not available right now — use the card form below.';
+      return;
+    }
+    msg.textContent = 'Waiting for Apple Pay…';
+    // tokenize() is called immediately in the click handler, as Apple
+    // requires — no awaits or API calls before it.
+    squareApplePay.tokenize().then(function (result) {
+      if (result.status !== 'OK') {
+        var first = (result.errors && result.errors[0]) || {};
+        msg.classList.add('err');
+        msg.textContent = first.message || 'Apple Pay could not complete — try the card form below.';
+        return;
+      }
+      submitCharge(result.token, name);
+    }).catch(function () {
+      msg.classList.add('err');
+      msg.textContent = 'Could not reach the game — check your connection and try again.';
+    });
+  });
 
   // ---- guess form -------------------------------------------------------------
   var nameInput = $('nameInput');

@@ -14,18 +14,30 @@
 // - Referrals: a friend who pays for at least one game earns the referrer
 //   1 free play, once per friend. Joining free earns nothing.
 //
-// PAYMENTS — Square payment links (no API keys in chat, ever):
-// - payments.json holds the mode and the two Square payment-link URLs.
-//   mode "free" (default): plays are free preview plays, $0 to the pot.
-//   mode "link": players pay on Square, come back, and claim their plays.
-// - A claim is only CONFIRMED (credits issued) in one of two ways:
-//   (a) SQUARE_ACCESS_TOKEN is set (Will connects it through the secure
-//       flow) — the server verifies the order via the Square Orders API
-//       (state COMPLETED + exact amount) and auto-confirms; or
-//   (b) Will confirms the claim in /admin (ADMIN_CODE env) by matching the
-//       player's name/amount/time against his Square sales.
-// - A redirect URL alone NEVER credits anyone — it can be faked by typing
-//   it in. An order ID can only ever credit once.
+// PAYMENTS — Square embedded checkout (Web Payments SDK):
+// - The player enters their card right on the game page. The browser
+//   tokenizes it with Square's SDK and sends only the one-time source ID
+//   to the server. The server charges it via the Square Payments API
+//   (POST /v2/payments) with an idempotency key per attempt.
+//   On Apple devices an Apple Pay button shows above the card form
+//   instead — its token goes through the exact same charge path
+//   (POST /api/payments/charge). Apple Pay needs the game domain
+//   registered in the Square Developer Console (Apple Pay section) and
+//   the domain verification file served at
+//   /.well-known/apple-developer-merchantid-domain-association (see the
+//   route below). Where Apple Pay is unavailable the button stays
+//   hidden and the card form works as before.
+// - A charge is only CONFIRMED (credits issued) when Square reports the
+//   payment COMPLETED for the exact expected amount in USD. The amount is
+//   always derived server-side from the kind ('single' = $5, 'bundle' =
+//   $100) — never from anything the client sends. A Square payment ID can
+//   only ever credit once.
+// - Live only when SQUARE_APPLICATION_ID + SQUARE_LOCATION_ID +
+//   SQUARE_ACCESS_TOKEN are all set (env vars on Railway). Otherwise the
+//   game runs in free-preview mode exactly as before: plays are free,
+//   $0 to the pot, and the page says payments are not live yet.
+// - The old payment-link redirect flow (?paid=single|bundle + claim) is
+//   retired — there is one payment path now.
 //
 // ROUNDS — 60 minutes, aligned to the America/New_York hour. A tick runs
 // every 5 seconds (and on every API call): any round whose end time passed
@@ -52,7 +64,7 @@ const {
   newReferralCode,
   consumeCredits,
 } = require('./game');
-const { verifyOrderPaid } = require('./square');
+const { chargeAndVerify } = require('./square');
 
 const PORT = parseInt(process.env.PORT || '3000', 10);
 const DB_PATH = process.env.DB_PATH || path.join(__dirname, 'data.db');
@@ -115,13 +127,29 @@ CREATE TABLE IF NOT EXISTS payments (
   amount_cents INTEGER NOT NULL,
   status TEXT NOT NULL DEFAULT 'pending',
   order_id TEXT,
+  payment_id TEXT,
   receipt_ref TEXT,
   verify_note TEXT,
   created_at INTEGER NOT NULL,
   confirmed_at INTEGER
 );
+`);
+
+// payment_id (the Square payment ID) was added when the game moved from
+// payment links to embedded checkout. Older DBs get the column added here —
+// BEFORE the index below is created, so an existing DB migrates cleanly.
+try {
+  const cols = db.prepare('PRAGMA table_info(payments)').all();
+  if (!cols.some((c) => c.name === 'payment_id')) {
+    db.exec('ALTER TABLE payments ADD COLUMN payment_id TEXT');
+  }
+} catch (e) { /* column already exists or table is new */ }
+
+db.exec(`
 CREATE UNIQUE INDEX IF NOT EXISTS idx_payments_order_used
   ON payments (order_id) WHERE order_id IS NOT NULL AND status = 'confirmed';
+CREATE UNIQUE INDEX IF NOT EXISTS idx_payments_payment_used
+  ON payments (payment_id) WHERE payment_id IS NOT NULL AND status = 'confirmed';
 `);
 
 // ---- meta helpers ---------------------------------------------------------
@@ -142,10 +170,12 @@ const getHouseCents = () => metaGet('house_cents', 0);
 const addHouseCents = (v) => metaSet('house_cents', getHouseCents() + v);
 
 // ---- payments config ------------------------------------------------------
+// Prices come from payments.json (falling back to the locked constants in
+// game.js). Whether payments are LIVE is decided by env vars only:
+// all three Square vars must be set. Nothing in payments.json can turn
+// payments on — and nothing here ever holds a secret.
 function loadPayments() {
   const defaults = {
-    mode: 'free', enabled: false,
-    singlePlayUrl: '', bundleUrl: '',
     singlePriceCents: SINGLE_PRICE_CENTS, bundlePriceCents: BUNDLE_PRICE_CENTS,
     bundlePaidPlays: BUNDLE_PAID_PLAYS, bundleBonusPlays: BUNDLE_BONUS_PLAYS,
   };
@@ -154,18 +184,21 @@ function loadPayments() {
     return { ...defaults, ...raw };
   } catch (e) { return defaults; }
 }
+function squareConfigured() {
+  return !!(process.env.SQUARE_APPLICATION_ID && process.env.SQUARE_LOCATION_ID && process.env.SQUARE_ACCESS_TOKEN);
+}
 function paymentsPublic() {
   const p = loadPayments();
+  const live = squareConfigured();
   return {
-    mode: p.mode,
-    enabled: p.mode === 'link' && !!(p.singlePlayUrl && p.bundleUrl),
-    singlePlayUrl: p.singlePlayUrl || '',
-    bundleUrl: p.bundleUrl || '',
+    // mode: 'free' (preview) or 'embedded' (card checkout on the page).
+    mode: live ? 'embedded' : 'free',
+    enabled: live,
     singlePriceCents: p.singlePriceCents,
     bundlePriceCents: p.bundlePriceCents,
     bundlePaidPlays: p.bundlePaidPlays,
     bundleBonusPlays: p.bundleBonusPlays,
-    autoVerify: !!process.env.SQUARE_ACCESS_TOKEN,
+    autoVerify: live,
   };
 }
 
@@ -259,8 +292,18 @@ function issueCreditsForPayment(payment) {
 function confirmPayment(paymentId) {
   const payment = db.prepare('SELECT * FROM payments WHERE id = ?').get(paymentId);
   if (!payment || payment.status !== 'pending') return null;
-  // An order ID can only ever credit once — if another confirmed payment
-  // already used this order, reject this one instead of double-crediting.
+  // A Square payment ID can only ever credit once — if another confirmed
+  // payment already used this payment (or the legacy order) ID, reject
+  // this one instead of double-crediting.
+  if (payment.payment_id) {
+    const used = db.prepare(
+      "SELECT id FROM payments WHERE payment_id = ? AND status = 'confirmed' AND id != ?"
+    ).get(payment.payment_id, paymentId);
+    if (used) {
+      db.prepare("UPDATE payments SET status = 'rejected', verify_note = 'payment already used' WHERE id = ?").run(paymentId);
+      return { payment: { ...payment, status: 'rejected' }, issued: null, duplicate: true };
+    }
+  }
   if (payment.order_id) {
     const used = db.prepare(
       "SELECT id FROM payments WHERE order_id = ? AND status = 'confirmed' AND id != ?"
@@ -385,9 +428,26 @@ function tick() {
 // ---- app -------------------------------------------------------------------
 const app = express();
 app.use(express.json({ limit: '16kb' }));
+
+// ---- Apple Pay domain verification --------------------------------------
+// Apple Pay on the web only works once Apple can fetch this file from the
+// game domain. Square issues the file; download the current copy from
+// https://app.squareup.com/digital-wallets/apple-pay/apple-developer-merchantid-domain-association
+// and drop it at public/.well-known/apple-developer-merchantid-domain-association.
+// Square updates this file from time to time — if Apple Pay ever stops
+// verifying, re-download it. express.static ignores dotfiles by default,
+// so this needs its own route, registered BEFORE the static middleware.
+// It serves in free-preview mode too: the file is public and harmless
+// without Square credentials configured.
+const APPLE_PAY_FILE = path.join(__dirname, 'public', '.well-known', 'apple-developer-merchantid-domain-association');
+app.get('/.well-known/apple-developer-merchantid-domain-association', (req, res) => {
+  if (!fs.existsSync(APPLE_PAY_FILE)) return res.status(404).end();
+  res.sendFile(APPLE_PAY_FILE);
+});
+
 app.use(express.static(path.join(__dirname, 'public')));
 
-// Tiny in-memory throttle: 10 guess posts / 5 claim posts per IP per minute.
+// Tiny in-memory throttle: 10 guess posts / 5 charge posts per IP per minute.
 const hitLog = new Map();
 function throttle(limit) {
   return (req, res, next) => {
@@ -537,7 +597,7 @@ app.post('/api/guess', throttle(10), (req, res) => {
 
   const pay = paymentsPublic();
   let creditType = 'bonus';
-  if (pay.mode === 'link') {
+  if (pay.enabled) {
     // Paid mode: a guess costs 1 credit. Bonus credits are spent first.
     const use = consumeCredits(player.paid_credits, player.bonus_credits, 1);
     if (!use.ok) {
@@ -564,72 +624,91 @@ app.post('/api/guess', throttle(10), (req, res) => {
   });
 });
 
-// ---- payments: claim + confirm --------------------------------------------
-// The player pays on Square (link opens in a new tab), Square redirects
-// back with ?paid=single|bundle&orderId=...&transactionId=..., and the
-// player claims their plays here. A claim is only CONFIRMED by (a) Square
-// Orders API verification when SQUARE_ACCESS_TOKEN is set, or (b) Will in
-// /admin. A redirect URL alone never credits anyone.
-app.post('/api/payments/claim', throttle(5), async (req, res) => {
+// ---- payments: embedded checkout ----------------------------------------
+// The page fetches the PUBLIC Square identifiers from here (application ID
+// + location ID). The access token is never sent to the browser — it stays
+// on the server and is only used to charge via the Payments API.
+app.get('/api/square-config', (req, res) => {
+  if (!squareConfigured()) return res.json({ enabled: false });
+  res.json({
+    enabled: true,
+    applicationId: process.env.SQUARE_APPLICATION_ID,
+    locationId: process.env.SQUARE_LOCATION_ID,
+  });
+});
+
+// Charge a tokenized card and, ONLY on a confirmed Square payment, issue
+// the plays. Body: { playerToken, name, kind: 'single'|'bundle', sourceId }
+// — sourceId is the one-time nonce from Square's Web Payments SDK.
+// The amount is derived server-side from kind; the client never sets it.
+// A declined card or a wrong amount credits 0 plays.
+app.post('/api/payments/charge', throttle(5), async (req, res) => {
   const pay = paymentsPublic();
-  if (pay.mode !== 'link') {
+  if (!pay.enabled) {
     return res.status(400).json({ ok: false, error: 'Payments are not switched on yet — plays are free for now.' });
   }
   const token = normalizeToken(req.body && req.body.playerToken);
   if (!token) return res.status(400).json({ ok: false, error: 'Reload the page and try again.' });
   const kind = req.body && req.body.kind === 'bundle' ? 'bundle' : 'single';
   const name = normalizeName(req.body && req.body.name);
-  const orderId = typeof (req.body && req.body.orderId) === 'string' ? req.body.orderId.trim().slice(0, 128) : '';
-  const receiptRef = typeof (req.body && req.body.receiptRef) === 'string' ? req.body.receiptRef.trim().slice(0, 128) : '';
+  const sourceId = typeof (req.body && req.body.sourceId) === 'string' ? req.body.sourceId.trim() : '';
+  if (!sourceId || sourceId.length > 256) {
+    return res.status(400).json({ ok: false, error: 'Payment did not start — please try your card again.' });
+  }
   const player = ensurePlayer(token, name || undefined);
   const amountCents = kind === 'bundle' ? pay.bundlePriceCents : pay.singlePriceCents;
 
-  if (orderId) {
-    const used = db.prepare(
-      "SELECT id FROM payments WHERE order_id = ? AND status = 'confirmed'"
-    ).get(orderId);
-    if (used) return res.status(409).json({ ok: false, error: 'That Square order was already used to claim plays.' });
-    const existing = db.prepare(
-      "SELECT id, status FROM payments WHERE player_token = ? AND kind = ? AND order_id = ? AND status = 'pending'"
-    ).get(token, kind, orderId);
-    if (existing) {
-      return res.json({ ok: true, status: 'pending', paymentId: existing.id, message: 'That claim is already waiting — Will confirms it in the admin view.' });
-    }
+  // Same player re-tapping Pay within 2 minutes for the same kind: don't
+  // charge twice — the first attempt is still being handled.
+  const recent = db.prepare(
+    "SELECT id FROM payments WHERE player_token = ? AND kind = ? AND status = 'pending' AND created_at > ?"
+  ).get(token, kind, Date.now() - 120000);
+  if (recent) {
+    return res.status(409).json({ ok: false, error: 'That payment is already being processed — give it a moment, then check your plays.' });
   }
 
   const info = db.prepare(
-    `INSERT INTO payments (player_token, kind, amount_cents, status, order_id, receipt_ref, created_at)
-     VALUES (?, ?, ?, 'pending', ?, ?, ?)`
-  ).run(token, kind, amountCents, orderId || null, receiptRef || null, Date.now());
+    `INSERT INTO payments (player_token, kind, amount_cents, status, created_at)
+     VALUES (?, ?, ?, 'pending', ?)`
+  ).run(token, kind, amountCents, Date.now());
   const paymentId = info.lastInsertRowid;
 
-  // Path (a): auto-verify with Square when a token is configured.
-  if (process.env.SQUARE_ACCESS_TOKEN && orderId) {
-    const v = await verifyOrderPaid(orderId, amountCents);
-    if (v.verified) {
-      const done = confirmPayment(paymentId);
-      const fresh = getPlayer(token);
-      return res.json({
-        ok: true, status: 'confirmed', paymentId,
-        paidCredits: fresh.paid_credits, bonusCredits: fresh.bonus_credits,
-        issued: done ? done.issued : null,
-        message: kind === 'bundle'
-          ? 'Payment verified with Square — 22 plays added (20 paid + 2 free).'
-          : 'Payment verified with Square — 1 play added.',
-      });
-    }
-    db.prepare('UPDATE payments SET verify_note = ? WHERE id = ?').run(`auto-verify failed: ${v.reason}`, paymentId);
+  const v = await chargeAndVerify(sourceId, amountCents, crypto.randomUUID());
+  if (!v.verified) {
+    db.prepare("UPDATE payments SET status = 'rejected', verify_note = ? WHERE id = ?")
+      .run(`charge failed: ${v.reason}${v.code ? ` (${v.code})` : ''}`, paymentId);
+    const msg = v.declined
+      ? 'Your card was declined — no charge went through and no plays were added. Check the card and try again.'
+      : v.reason === 'amount_mismatch'
+        ? 'The payment did not match the price — no plays were added. Please try again.'
+        : 'The payment could not be completed — no charge went through and no plays were added. Please try again.';
+    return res.status(402).json({ ok: false, error: msg, reason: v.reason });
   }
 
+  // Record the Square payment ID first, then confirm (which double-checks
+  // the ID was never used before and issues the credits + referral reward).
+  db.prepare('UPDATE payments SET payment_id = ? WHERE id = ?').run(v.paymentId, paymentId);
+  const done = confirmPayment(paymentId);
+  if (!done || done.duplicate) {
+    return res.status(409).json({ ok: false, error: 'That payment was already used to add plays.' });
+  }
+  const fresh = getPlayer(token);
   res.json({
-    ok: true, status: 'pending', paymentId,
-    message: process.env.SQUARE_ACCESS_TOKEN
-      ? 'Square could not verify that order yet — it is waiting for Will to confirm.'
-      : 'Claim received — Will confirms it (check the Square sale) and your plays will be added.',
+    ok: true, status: 'confirmed', paymentId,
+    paidCredits: fresh.paid_credits, bonusCredits: fresh.bonus_credits,
+    issued: done.issued,
+    receiptUrl: v.receiptUrl || null,
+    message: kind === 'bundle'
+      ? 'Payment confirmed — 22 plays added (20 paid + 2 free). Good luck!'
+      : 'Payment confirmed — 1 play added. Good luck!',
   });
 });
 
 // ---- admin (Will only, ADMIN_CODE env) ------------------------------------
+// Embedded checkout confirms payments itself, so there is nothing to
+// confirm by hand anymore. /admin is now a read-only view: jackpot,
+// house cut, whether card payments are live, and recent payments.
+app.get('/admin', (req, res) => res.sendFile(path.join(__dirname, 'public', 'admin.html')));
 function adminAuthed(req) {
   if (!ADMIN_CODE) return false;
   const code = String((req.body && req.body.code) || '');
@@ -637,44 +716,20 @@ function adminAuthed(req) {
   return crypto.timingSafeEqual(Buffer.from(code), Buffer.from(ADMIN_CODE));
 }
 
-app.post('/api/admin/claims', (req, res) => {
+app.post('/api/admin/stats', (req, res) => {
   if (!ADMIN_CODE) return res.status(503).json({ ok: false, error: 'Admin is not configured (set ADMIN_CODE).' });
   if (!adminAuthed(req)) return res.status(401).json({ ok: false, error: 'Wrong code.' });
-  const pending = db.prepare(
-    `SELECT p.*, pl.display_name AS player_name FROM payments p
-     LEFT JOIN players pl ON pl.player_token = p.player_token
-     WHERE p.status = 'pending' ORDER BY p.created_at ASC`
-  ).all();
   const recent = db.prepare(
     `SELECT p.*, pl.display_name AS player_name FROM payments p
      LEFT JOIN players pl ON pl.player_token = p.player_token
-     WHERE p.status != 'pending' ORDER BY p.created_at DESC LIMIT 20`
+     ORDER BY p.created_at DESC LIMIT 20`
   ).all();
   res.json({
-    ok: true, pending, recent,
+    ok: true, recent,
     jackpotCents: getJackpotCents(), houseCents: getHouseCents(),
-    autoVerify: !!process.env.SQUARE_ACCESS_TOKEN,
+    paymentsLive: squareConfigured(),
+    autoVerify: squareConfigured(),
   });
-});
-
-app.post('/api/admin/confirm', (req, res) => {
-  if (!ADMIN_CODE) return res.status(503).json({ ok: false, error: 'Admin is not configured (set ADMIN_CODE).' });
-  if (!adminAuthed(req)) return res.status(401).json({ ok: false, error: 'Wrong code.' });
-  const done = confirmPayment(Number(req.body && req.body.paymentId));
-  if (!done) return res.status(404).json({ ok: false, error: 'Claim not found or already handled.' });
-  if (done.duplicate) return res.json({ ok: false, error: 'That Square order was already used — claim rejected, no credits issued.' });
-  res.json({ ok: true, payment: done.payment, issued: done.issued });
-});
-
-app.post('/api/admin/reject', (req, res) => {
-  if (!ADMIN_CODE) return res.status(503).json({ ok: false, error: 'Admin is not configured (set ADMIN_CODE).' });
-  if (!adminAuthed(req)) return res.status(401).json({ ok: false, error: 'Wrong code.' });
-  const payment = db.prepare('SELECT * FROM payments WHERE id = ?').get(Number(req.body && req.body.paymentId));
-  if (!payment || payment.status !== 'pending') {
-    return res.status(404).json({ ok: false, error: 'Claim not found or already handled.' });
-  }
-  db.prepare("UPDATE payments SET status = 'rejected' WHERE id = ?").run(payment.id);
-  res.json({ ok: true });
 });
 
 setInterval(tick, 5000);
@@ -684,7 +739,8 @@ ensureRound();
 app.listen(PORT, () => {
   console.log(`Spin the Wheel 24/7 listening on port ${PORT} (DB: ${DB_PATH})`);
   const pay = paymentsPublic();
-  console.log(`Payments mode: ${pay.mode}${pay.mode === 'link' ? (pay.enabled ? ' (links configured)' : ' (LINKS MISSING — set singlePlayUrl/bundleUrl in payments.json)') : ''}, Square auto-verify: ${pay.autoVerify ? 'ON' : 'OFF (claims wait for /admin)'}`);
+  console.log(`Payments mode: ${pay.mode}${pay.enabled ? ' (embedded card + Apple Pay checkout live)' : ' (FREE PREVIEW — set SQUARE_APPLICATION_ID, SQUARE_LOCATION_ID and SQUARE_ACCESS_TOKEN to switch card payments on)'}`);
+  console.log(`Apple Pay domain file: ${fs.existsSync(APPLE_PAY_FILE) ? 'present' : 'MISSING — download the current file from Square (see the route above server.js) or Apple Pay cannot verify'}`);
   const r = openRound();
   if (r) console.log(`Current round #${r.id} spins at ${new Date(r.ends_at).toLocaleString('en-US', { timeZone: 'America/New_York' })} ET, jackpot ${formatCents(displayJackpotCents(r))}`);
 });

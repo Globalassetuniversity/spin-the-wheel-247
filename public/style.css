@@ -216,20 +216,37 @@ tr.me td { color: var(--amber); }
 .buy-btn.bundle { background: linear-gradient(90deg, var(--amber), var(--pink), var(--violet)); }
 .buy-btn.disabled { opacity: .45; pointer-events: none; }
 .buy-note { color: var(--muted); font-size: 14px; text-align: center; margin: 0 0 4px; }
-.claim-box {
+.checkout-box {
   border: 1px solid rgba(34, 211, 238, .5); background: rgba(34, 211, 238, .07);
   border-radius: 12px; padding: 12px; margin-top: 12px;
 }
-.claim-box h3 { margin: 0 0 6px; font-family: 'Orbitron', sans-serif; font-size: 15px; color: var(--cyan); letter-spacing: .08em; }
-.claim-box .muted { color: var(--muted); font-size: 15px; margin: 0 0 8px; }
-.claim-box input {
-  width: 100%; padding: 10px 12px; font-size: 16px; font-family: 'Rajdhani', sans-serif; font-weight: 600;
-  color: var(--text); background: rgba(2, 6, 23, .7); border: 1px solid var(--panel-border);
-  border-radius: 10px; outline: none; box-sizing: border-box;
+.checkout-box h3 { margin: 0 0 6px; font-family: 'Orbitron', sans-serif; font-size: 15px; color: var(--cyan); letter-spacing: .08em; }
+.checkout-box .muted { color: var(--muted); font-size: 15px; margin: 0 0 8px; }
+.checkout-box .row { display: flex; gap: 8px; flex-wrap: wrap; }
+.checkout-box .row .btn { flex: 1; min-width: 140px; font-size: 13px; padding: 11px 10px; }
+.btn.ghost {
+  background: transparent; border: 1px solid rgba(148, 163, 184, .5);
+  color: var(--text); box-shadow: none;
 }
-.claim-box input:focus { border-color: var(--cyan); }
-.claim-box .row { display: flex; gap: 8px; flex-wrap: wrap; }
-.claim-box .row .btn { flex: 1; min-width: 140px; font-size: 13px; padding: 11px 10px; }
+#card-container {
+  min-height: 100px; border: 1px solid var(--panel-border); border-radius: 10px;
+  background: rgba(2, 6, 23, .7); padding: 4px;
+}
+/* Apple Pay button (Web Payments SDK). Only shown when the SDK reports
+   Apple Pay is available (Safari on an Apple device with Apple Pay set
+   up); on every other browser the wrapper stays hidden. */
+#apple-pay-button {
+  -webkit-appearance: -apple-pay-button;
+  -apple-pay-button-type: plain;
+  -apple-pay-button-style: black;
+  display: block; width: 100%; height: 46px; border: 0; border-radius: 10px;
+  cursor: pointer; margin-bottom: 10px;
+}
+.or-divider {
+  text-align: center; color: var(--muted); font-size: 12px; margin: 0 0 10px;
+  text-transform: uppercase; letter-spacing: .18em;
+}
+/* Square's card iframe inherits the page font sizing via its own styles. */
 .tag-paid, .tag-free {
   font-family: 'Orbitron', sans-serif; font-size: 10px; padding: 2px 6px; border-radius: 999px; font-weight: 800;
 }
