@@ -109,6 +109,21 @@ latest 100 messages. Message text is HTML-escaped on the way out, so no
 one can inject markup. The Wheel itself posts a spin announcement in chat
 when each round closes. `node test-chat.js` runs the chat test suite.
 
+## Wheel sounds (built Nov 7, 2026)
+
+Synthesized with the Web Audio API — no audio files, nothing to host.
+While the wheel spins, a ratchet-style tick clicks faster at first and
+slows down with the wheel (pitch drops as it slows). When the spin
+lands: a big ascending arpeggio + sparkle for a jackpot, a cheerful
+three-note chime for a closest-guess win, and a soft two-note sigh when
+nobody guessed. A 🔊/🔇 toggle sits on the wheel card; sound is on by
+default, but browsers block audio until the player taps or types, so
+sounds only start after the first interaction. The choice is saved in
+localStorage (`stw247_sound`) and sticks between visits. Volume is
+modest (master gain 0.18). All sound code lives in `public/app.js`
+(sound engine + `playTick` / `playResultSound` hooks in the spin
+animation); no server change was needed.
+
 ## How it runs itself
 
 Rounds are 60 minutes, aligned to the America/New_York hour. A tick runs
