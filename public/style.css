@@ -300,6 +300,18 @@ tr.me td { color: var(--amber); }
   font-family: 'Rajdhani', sans-serif; font-weight: 700;
 }
 .chat-shout:active { border-color: var(--pink); background: rgba(236, 72, 153, .18); }
+
+/* Wheel sound toggle — a pill button on the wheel card header, big
+   enough to tap on a phone. Cyan glow while sound is on. */
+.sound-toggle {
+  float: right; background: rgba(2, 6, 23, .7); border: 1px solid var(--cyan);
+  color: var(--text); border-radius: 999px; padding: 6px 14px; font-size: 15px;
+  cursor: pointer; font-family: 'Rajdhani', sans-serif; font-weight: 700;
+  letter-spacing: .04em; text-transform: none;
+  box-shadow: 0 0 10px rgba(34, 211, 238, .25);
+}
+.sound-toggle[aria-pressed="false"] { border-color: var(--panel-border); box-shadow: none; opacity: .75; }
+.sound-toggle:active { background: rgba(34, 211, 238, .18); }
 .chat-form { display: flex; gap: 8px; }
 .chat-form input {
   flex: 1; min-width: 0; padding: 12px 14px; font-size: 17px; font-family: 'Rajdhani', sans-serif; font-weight: 700;
