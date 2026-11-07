@@ -46,13 +46,15 @@ function formatCents(cents) {
 }
 
 // ---- round timing -------------------------------------------------------
-// Rounds are 60 minutes, aligned to America/New_York hour boundaries:
-// a round opens at :00 ET and the wheel spins at the next :00 ET.
+// Rounds are 5 minutes, aligned to the America/New_York clock: a round
+// ends at :00, :05, :10, … :55 ET and the next one opens immediately.
 // ROUND_MINUTES env overrides the length (used for local testing only);
 // with an override, rounds are fixed-length from their start time.
+const ROUND_INTERVAL_MS = 5 * 60 * 1000;
+
 function roundLengthMs() {
   const m = parseInt(process.env.ROUND_MINUTES || '', 10);
-  return Number.isFinite(m) && m > 0 ? m * 60 * 1000 : 60 * 60 * 1000;
+  return Number.isFinite(m) && m > 0 ? m * 60 * 1000 : ROUND_INTERVAL_MS;
 }
 
 // Offset (ms) between UTC and America/New_York wall time at a given instant.
@@ -70,16 +72,17 @@ function etOffsetMs(date) {
   return asUTC - date.getTime();
 }
 
-// Epoch ms of the next America/New_York hour boundary after nowMs.
-function nextEtHourBoundary(nowMs) {
+// Epoch ms of the next America/New_York 5-minute boundary after nowMs
+// (ET wall-clock minutes :00, :05, :10, … :55, on the minute).
+function nextEtRoundBoundary(nowMs) {
   const off = etOffsetMs(new Date(nowMs));
   const wall = nowMs + off;
-  let nextWall = Math.floor(wall / 3600000) * 3600000 + 3600000;
+  let nextWall = Math.floor(wall / ROUND_INTERVAL_MS) * ROUND_INTERVAL_MS + ROUND_INTERVAL_MS;
   // Refine the offset at the boundary (matters across DST transitions).
   let boundary = nextWall - etOffsetMs(new Date(nextWall - off));
   boundary = nextWall - etOffsetMs(new Date(boundary));
   if (boundary <= nowMs) {
-    nextWall += 3600000;
+    nextWall += ROUND_INTERVAL_MS;
     boundary = nextWall - etOffsetMs(new Date(nextWall - etOffsetMs(new Date(nextWall))));
   }
   return boundary;
@@ -87,7 +90,7 @@ function nextEtHourBoundary(nowMs) {
 
 function computeRoundEnd(startsAtMs) {
   if (process.env.ROUND_MINUTES) return startsAtMs + roundLengthMs();
-  return nextEtHourBoundary(startsAtMs);
+  return nextEtRoundBoundary(startsAtMs);
 }
 
 // ---- winner logic -------------------------------------------------------
@@ -157,7 +160,8 @@ module.exports = {
   formatCents,
   roundLengthMs,
   etOffsetMs,
-  nextEtHourBoundary,
+  nextEtRoundBoundary,
+  ROUND_INTERVAL_MS,
   computeRoundEnd,
   drawWinningNumber,
   computeWinners,
