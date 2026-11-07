@@ -402,17 +402,6 @@
         '</span></li>';
     }).join('');
 
-    // Sponsors
-    $('sponsors').innerHTML = state.sponsors.map(function (s) {
-      if (s.name) {
-        return '<div class="sponsor filled"><div class="s-name">' + esc(s.name) + '</div>' +
-          '<div class="s-msg">' + esc(s.message) + '</div>' +
-          '<div class="s-price">$' + s.price + ' / spot</div></div>';
-      }
-      return '<div class="sponsor"><div class="s-avail">Spot ' + s.slot + ' available</div>' +
-        '<div class="s-msg">Your business here, every round.</div>' +
-        '<div class="s-price">$25–$50 / spot</div></div>';
-    }).join('');
   }
 
   function poll() {
