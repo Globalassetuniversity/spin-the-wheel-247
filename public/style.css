@@ -264,3 +264,47 @@ tr.me td { color: var(--amber); }
 }
 .ref-stats { color: var(--muted); font-size: 16px; font-weight: 700; margin: 10px 0 0; }
 .section { margin-top: 16px; }
+
+/* live chat — fun + playful, same neon look */
+.chat-list {
+  max-height: 280px; overflow-y: auto; display: flex; flex-direction: column; gap: 10px;
+  padding: 4px 2px; scrollbar-width: thin;
+}
+.chat-empty { margin: 4px 0; }
+.chat-msg {
+  background: rgba(2, 6, 23, .55); border: 1px solid var(--panel-border);
+  border-radius: 12px; padding: 8px 12px;
+}
+.chat-msg.mine { border-color: rgba(245, 158, 11, .55); box-shadow: 0 0 12px rgba(245, 158, 11, .18); }
+.chat-msg.system { border-color: rgba(34, 211, 238, .55); background: rgba(34, 211, 238, .08); }
+.chat-name {
+  font-family: 'Orbitron', sans-serif; font-size: 13px; font-weight: 800; color: var(--cyan);
+}
+.chat-msg.system .chat-name { color: var(--amber); }
+.chat-time { color: var(--muted); font-size: 11px; margin-left: 6px; font-weight: 700; }
+.chat-text { font-size: 17px; font-weight: 600; margin: 2px 0 6px; overflow-wrap: anywhere; }
+.chat-react-row { display: flex; flex-wrap: wrap; gap: 6px; }
+.chat-react {
+  background: rgba(2, 6, 23, .7); border: 1px solid var(--panel-border); color: var(--text);
+  border-radius: 999px; padding: 3px 10px; font-size: 15px; cursor: pointer;
+  font-family: 'Rajdhani', sans-serif; font-weight: 700; line-height: 1.4;
+}
+.chat-react.on {
+  border-color: var(--pink); background: rgba(236, 72, 153, .18);
+  box-shadow: 0 0 10px rgba(236, 72, 153, .35);
+}
+.chat-shouts { display: flex; flex-wrap: wrap; gap: 8px; margin: 12px 0; }
+.chat-shout {
+  background: rgba(2, 6, 23, .7); border: 1px solid var(--panel-border); color: var(--text);
+  border-radius: 999px; padding: 7px 14px; font-size: 16px; cursor: pointer;
+  font-family: 'Rajdhani', sans-serif; font-weight: 700;
+}
+.chat-shout:active { border-color: var(--pink); background: rgba(236, 72, 153, .18); }
+.chat-form { display: flex; gap: 8px; }
+.chat-form input {
+  flex: 1; min-width: 0; padding: 12px 14px; font-size: 17px; font-family: 'Rajdhani', sans-serif; font-weight: 700;
+  color: var(--text); background: rgba(2, 6, 23, .7); border: 1px solid var(--panel-border);
+  border-radius: 10px; outline: none;
+}
+.chat-form input:focus { border-color: var(--cyan); box-shadow: 0 0 0 2px rgba(34, 211, 238, .35); }
+.chat-form .btn { flex: none; }
