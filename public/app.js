@@ -118,13 +118,27 @@
     spinTo = rot + 5 * TAU + delta;
     spinStart = performance.now();
     spinning = true;
+    lastPointerIdx = pointerIndex(rot);
+    lastTickAt = 0;
   }
 
   function frame(now) {
     if (spinning) {
       var t = Math.min(1, (now - spinStart) / 4500);
       rot = spinFrom + (spinTo - spinFrom) * easeOutCubic(t);
-      if (t >= 1) { spinning = false; rot = spinTo; holdUntil = now + 25000; }
+      // Ratchet tick each time the pointer crosses a segment — the
+      // throttle inside playTick keeps it sounding like clicks, and
+      // the pitch falls as the wheel slows (1 - t).
+      var idx = pointerIndex(rot);
+      if (lastPointerIdx !== null && idx !== lastPointerIdx) playTick(1 - t);
+      lastPointerIdx = idx;
+      if (t >= 1) {
+        spinning = false;
+        rot = spinTo;
+        holdUntil = now + 25000;
+        playResultSound(spinResult);
+        spinResult = null;
+      }
     } else if (now > holdUntil) {
       rot += 0.00035;
     }
@@ -132,6 +146,118 @@
     updateReadout();
     requestAnimationFrame(frame);
   }
+
+  // ---- wheel sounds ---------------------------------------------------------
+  // Synthesized with the Web Audio API — no audio files to download.
+  // A ratchet-style tick while the wheel spins (fast at first, slowing
+  // as the wheel slows), then a flourish when the round closes: a big
+  // arpeggio for a jackpot, a cheerful chime for a closest-guess win,
+  // and a soft two-note sigh when nobody guessed. Sound is ON by
+  // default, but browsers block audio until the player taps or types
+  // something — so the context is only created on the first interaction
+  // and every tick/note silently no-ops until then. The toggle below
+  // persists the choice in localStorage.
+  var soundOn = localStorage.getItem('stw247_sound') !== 'off';
+  var audioCtx = null;
+  var masterGain = null;
+  var lastTickAt = 0;
+
+  function ensureAudio() {
+    if (!soundOn) return null;
+    try {
+      if (!audioCtx) {
+        var AC = window.AudioContext || window.webkitAudioContext;
+        if (!AC) return null;
+        audioCtx = new AC();
+        masterGain = audioCtx.createGain();
+        masterGain.gain.value = 0.18; // modest — fun, not annoying
+        masterGain.connect(audioCtx.destination);
+      }
+      if (audioCtx.state === 'suspended') audioCtx.resume();
+      return audioCtx;
+    } catch (e) { return null; }
+  }
+
+  // First tap / keypress anywhere unlocks audio for the rest of the visit.
+  document.addEventListener('pointerdown', ensureAudio);
+  document.addEventListener('keydown', ensureAudio);
+
+  function playNote(freq, startOffset, dur, type, vol) {
+    if (!audioCtx || !masterGain) return;
+    try {
+      var t = audioCtx.currentTime + startOffset;
+      var osc = audioCtx.createOscillator();
+      var g = audioCtx.createGain();
+      osc.type = type || 'triangle';
+      osc.frequency.value = freq;
+      g.gain.setValueAtTime(0.0001, t);
+      g.gain.exponentialRampToValueAtTime(vol || 0.5, t + 0.02);
+      g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+      osc.connect(g);
+      g.connect(masterGain);
+      osc.start(t);
+      osc.stop(t + dur + 0.05);
+    } catch (e) { /* audio is decoration — never break the game */ }
+  }
+
+  // One ratchet tick. speed is 1 (wheel flying) → 0 (almost stopped);
+  // the pitch drops as the wheel slows. Throttled to one tick per
+  // 40ms — the wheel crosses segments far faster than that at full
+  // speed, and the throttle is what makes it sound like a ratchet
+  // instead of a buzz.
+  function playTick(speed) {
+    if (!audioCtx || !masterGain) return;
+    var now = performance.now();
+    if (now - lastTickAt < 40) return;
+    lastTickAt = now;
+    tickCount++;
+    try {
+      var t = audioCtx.currentTime;
+      var osc = audioCtx.createOscillator();
+      var g = audioCtx.createGain();
+      osc.type = 'square';
+      osc.frequency.value = 700 + speed * 900;
+      g.gain.setValueAtTime(0.10, t);
+      g.gain.exponentialRampToValueAtTime(0.001, t + 0.03);
+      osc.connect(g);
+      g.connect(masterGain);
+      osc.start(t);
+      osc.stop(t + 0.04);
+    } catch (e) { /* ignore */ }
+  }
+
+  // The round-end flourish. result is the lastResult object from the
+  // server (or null when unknown — a single soft ding).
+  function playResultSound(result) {
+    if (!audioCtx || !masterGain) return;
+    if (!result) { playNote(660, 0, 0.25, 'sine', 0.4); return; }
+    if (result.winner_exact) {
+      // Jackpot! Big ascending arpeggio + sparkle on top.
+      [523.25, 659.25, 783.99, 1046.5].forEach(function (f, i) {
+        playNote(f, i * 0.12, 0.35, 'triangle', 0.55);
+      });
+      playNote(1318.5, 0.5, 0.5, 'sine', 0.4);
+      playNote(1568, 0.62, 0.6, 'sine', 0.35);
+    } else if (result.winner_names) {
+      // Closest guess wins — short cheerful chime.
+      [523.25, 659.25, 783.99].forEach(function (f, i) {
+        playNote(f, i * 0.1, 0.3, 'triangle', 0.5);
+      });
+    } else {
+      // Nobody guessed — soft two-note sigh, jackpot rolls over.
+      playNote(392, 0, 0.3, 'sine', 0.35);
+      playNote(329.63, 0.18, 0.4, 'sine', 0.3);
+    }
+  }
+
+  // Small confirm blip when the player turns sound back on.
+  function playBlip() {
+    playNote(880, 0, 0.15, 'sine', 0.4);
+    playNote(1174.66, 0.08, 0.2, 'sine', 0.35);
+  }
+
+  var spinResult = null; // lastResult for the round currently spinning
+  var lastPointerIdx = null;
 
   // ---- helpers --------------------------------------------------------------
   function money(cents) { return '$' + (cents / 100).toFixed(2); }
@@ -188,6 +314,7 @@
 
     // Round changed → the previous round just spun.
     if (lastRoundId !== null && state.round.id !== lastRoundId && state.lastResult) {
+      spinResult = state.lastResult;
       startSpinAnimation(state.lastResult.winning_number);
     }
     if (lastRoundId === null && state.lastResult) {
@@ -788,6 +915,37 @@
       fetchChat();
     }).catch(function () {});
   });
+
+  // ---- sound toggle ---------------------------------------------------------
+  // Big, visible, right on the wheel card. Persists in localStorage so
+  // the choice sticks between visits. Turning it back on plays a tiny
+  // blip so the player hears immediately that sound is working.
+  var soundToggle = $('soundToggle');
+  function refreshSoundToggle() {
+    soundToggle.textContent = soundOn ? '🔊 Sound on' : '🔇 Sound off';
+    soundToggle.setAttribute('aria-pressed', soundOn ? 'true' : 'false');
+  }
+  soundToggle.addEventListener('click', function () {
+    soundOn = !soundOn;
+    localStorage.setItem('stw247_sound', soundOn ? 'on' : 'off');
+    refreshSoundToggle();
+    if (soundOn) { ensureAudio(); playBlip(); }
+  });
+  refreshSoundToggle();
+
+  // Tiny handle for headless smoke tests (sound functions + toggle state).
+  var tickCount = 0;
+  window.__stw247 = window.__stw247 || {};
+  window.__stw247.sound = {
+    isOn: function () { return soundOn; },
+    playTick: playTick,
+    playResultSound: playResultSound,
+    playBlip: playBlip,
+    ensureAudio: ensureAudio,
+    tickCount: function () { return tickCount; },
+  };
+  window.__stw247.spin = startSpinAnimation;
+  window.__stw247.isSpinning = function () { return spinning; };
 
   // ---- referral copy ----------------------------------------------------------
   $('copyRefBtn').addEventListener('click', function () {
